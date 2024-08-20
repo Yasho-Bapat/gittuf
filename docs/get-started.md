@@ -16,9 +16,13 @@ have [cosign] installed on your system, then you will be able to securely
 download and verify the gittuf release:
 
 > [!NOTE]
-> For `windows`, make sure to include the `.exe` extension for the binary,
-> signature and certificate file. Similarly, `sudo install` and the destination
-> path must be modified as well.
+> For `windows`, the `.exe` extension needs to be included for the binary 
+> (as `filename.exe`), signature (as `filename.exe.sig`) and certificate 
+> (as `filename.exe.pem`) files.
+> Similarly, `sudo install` needs to be changed to `Start-Process` along with 
+> the destination path. Explicit instructions are listed below.
+
+### Unix-based operating systems
 
 ```sh
 # Modify these values as necessary.
@@ -27,7 +31,7 @@ ARCH=amd64
 # One of: linux, darwin, freebsd
 OS=linux
 # See https://github.com/gittuf/gittuf/releases for the latest version
-VERSION=0.4.0
+VERSION=0.5.2
 cd $(mktemp -d)
 
 curl -LO https://github.com/gittuf/gittuf/releases/download/v${VERSION}/gittuf_${VERSION}_${OS}_${ARCH}
@@ -46,8 +50,51 @@ cd -
 gittuf version
 ```
 
-**Building from source.** To build from source, clone the repository and run
+### Windows
+
+Run this script as a `.ps1` file (PowerShell script).
+
+```powershell
+# Modify these values as necessary.
+# One of: amd64, arm64
+ARCH="amd64"
+OS="windows"
+# See https://github.com/gittuf/gittuf/releases for the latest version
+VERSION="0.5.2"
+
+Push-Location # this saves the current working directory to the stack
+
+Invoke-WebRequest -Uri "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe" -OutFile "gittuf_${VERSION}${OS}${ARCH}.exe"
+Invoke-WebRequest -Uri "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe.sig" -OutFile "gittuf_${VERSION}${OS}${ARCH}.exe.sig"
+Invoke-WebRequest -Uri "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe.pem" -OutFile "gittuf_${VERSION}${OS}${ARCH}.exe.pem"
+
+cosign verify-blob --certificate gittuf_${VERSION}_${OS}_${ARCH}.exe.pem --signature gittuf_${VERSION}_${OS}_${ARCH}.exe.sig --certificate-identity https://github.com/gittuf/gittuf/.github/workflows/release.yml@refs/tags/v${VERSION} --certificate-oidc-issuer https://token.actions.githubusercontent.com gittuf_${VERSION}_${OS}_${ARCH}.exe
+
+cp .\gittuf_${VERSION}_windows_${ARCH}.exe $env:GOPATH\bin\gittuf.exe
+
+Pop-Location # pops from the stack and returns to the previous working directory.
+gittuf version
+```
+
+> [!NOTE]
+> The Windows installation guideline assumes that Go has been properly installed
+> on the system (including setting proper environment variables). Please refer to
+> our [Go for Windows document] for instructions to do this, if not already done. 
+
+### Building from source
+
+> [!NOTE] 
+> `make` needs to be installed manually on Windows as it is not packaged with 
+> the OS. The easiest way to install `make` on Windows is to use the 
+> `ezwinports.make` package: Simply type `winget install ezwinports.make` 
+> in PowerShell.
+> You can also install it from the [GNU website] or the [chocolatey] package manager.
+
+#### *Nix systems
+
+To build from source, clone the repository and run
 `make`. This will also run the test suite prior to installing gittuf. Note that
+git clone https://github.com/gittuf/gittuf
 Go 1.22 or higher is necessary to build gittuf.
 
 ```sh
@@ -56,10 +103,24 @@ cd gittuf
 make
 ```
 
+#### Windows
+
+To build from source, clone the repository and run `go install`. This is the best
+way to do it for now.
+```powershell
+git clone https://github.com/gittuf/gittuf
+cd gittuf
+go install
+```
+This will automatically put `gittuf.exe` in your `GOPATH` as configured.
+
 ## Create keys
 
 First, create some keys that are used for the gittuf root of trust, policies, as
 well as for commits created while following this guide.
+
+> [!NOTE]
+> If running on Windows, do not use the `-N ""` flag in the `ssh-keygen` commands
 
 ```bash
 mkdir gittuf-get-started && cd gittuf-get-started
@@ -174,3 +235,6 @@ the gittuf repository.
 [CLI docs]: /docs/cli/gittuf.md
 [open an issue]: https://github.com/gittuf/gittuf/issues/new/choose
 [dogfooding]: /docs/dogfood.md
+[GNU website]: https://gnuwin32.sourceforge.net/packages/make.htm
+[chocolatey]: https://community.chocolatey.org/packages/make
+[Go for Windows document]: windows/goconfig_win.md
