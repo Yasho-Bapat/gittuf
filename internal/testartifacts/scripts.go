@@ -5,4 +5,7 @@ package artifacts
 import _ "embed"
 
 //go:embed testdata/scripts/askpass.sh
-var AskpassScript []byte
+var UnixAskpassScript []byte
+
+//go:embed testdata/scripts/askpass.exe
+var WindowsAskpassScript []byte
