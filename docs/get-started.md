@@ -19,8 +19,6 @@ download and verify the gittuf release:
 > For `windows`, the `.exe` extension needs to be included for the binary 
 > (as `filename.exe`), signature (as `filename.exe.sig`) and certificate 
 > (as `filename.exe.pem`) files.
-> Similarly, `sudo install` needs to be changed to `Start-Process` along with 
-> the destination path. Explicit instructions are listed below.
 
 ### Unix-based operating systems
 
@@ -62,24 +60,22 @@ OS="windows"
 # See https://github.com/gittuf/gittuf/releases for the latest version
 VERSION="0.5.2"
 
-Push-Location # this saves the current working directory to the stack
-
-Invoke-WebRequest -Uri "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe" -OutFile "gittuf_${VERSION}${OS}${ARCH}.exe"
-Invoke-WebRequest -Uri "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe.sig" -OutFile "gittuf_${VERSION}${OS}${ARCH}.exe.sig"
-Invoke-WebRequest -Uri "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe.pem" -OutFile "gittuf_${VERSION}${OS}${ARCH}.exe.pem"
+curl "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe" -O "gittuf_${VERSION}_${OS}_${ARCH}.exe"
+curl "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe.sig" -O "gittuf_${VERSION}_${OS}_${ARCH}.exe.sig"
+curl "https://github.com/gittuf/gittuf/releases/download/v$VERSION/gittuf_${VERSION}_${OS}_${ARCH}.exe.pem" -O "gittuf_${VERSION}_${OS}_${ARCH}.exe.pem"
 
 cosign verify-blob --certificate gittuf_${VERSION}_${OS}_${ARCH}.exe.pem --signature gittuf_${VERSION}_${OS}_${ARCH}.exe.sig --certificate-identity https://github.com/gittuf/gittuf/.github/workflows/release.yml@refs/tags/v${VERSION} --certificate-oidc-issuer https://token.actions.githubusercontent.com gittuf_${VERSION}_${OS}_${ARCH}.exe
-
-cp .\gittuf_${VERSION}_windows_${ARCH}.exe $env:GOPATH\bin\gittuf.exe
-
-Pop-Location # pops from the stack and returns to the previous working directory.
-gittuf version
 ```
 
-> [!NOTE]
-> The Windows installation guideline assumes that Go has been properly installed
-> on the system (including setting proper environment variables). Please refer to
-> our [Go for Windows document] for instructions to do this, if not already done. 
+The gittuf binary is now verified on your system. You can run it from the terminal
+as `gittuf.exe`. If Go is installed on your system (see our [Go for Windows 
+document] for details), you can further run the following commands to add gittuf to `PATH` and
+let it be accessible from across the system as a recognized command:
+
+```powershell
+cp .\gittuf_${VERSION}_windows_${ARCH}.exe $env:GOPATH\bin\gittuf.exe
+gittuf version
+```
 
 ### Building from source
 
@@ -90,11 +86,10 @@ gittuf version
 > in PowerShell.
 > You can also install it from the [GNU website] or the [chocolatey] package manager.
 
-#### *Nix systems
+#### Unix-based operating systems
 
 To build from source, clone the repository and run
 `make`. This will also run the test suite prior to installing gittuf. Note that
-git clone https://github.com/gittuf/gittuf
 Go 1.22 or higher is necessary to build gittuf.
 
 ```sh
@@ -105,13 +100,16 @@ make
 
 #### Windows
 
-To build from source, clone the repository and run `go install`. This is the best
-way to do it for now.
+The best way to build from source is to clone the repository and run 
+`go install`. This command will run only if Go has been properly installed on 
+your system (see the [Go for Windows document] for more information)
+
 ```powershell
 git clone https://github.com/gittuf/gittuf
 cd gittuf
 go install
 ```
+
 This will automatically put `gittuf.exe` in your `GOPATH` as configured.
 
 ## Create keys
@@ -120,7 +118,8 @@ First, create some keys that are used for the gittuf root of trust, policies, as
 well as for commits created while following this guide.
 
 > [!NOTE]
-> If running on Windows, do not use the `-N ""` flag in the `ssh-keygen` commands
+> If running on Windows, do not use the `-N ""` flag in the `ssh-keygen` commands.
+> Instead, enter an empty passphrase when prompted.
 
 ```bash
 mkdir gittuf-get-started && cd gittuf-get-started
