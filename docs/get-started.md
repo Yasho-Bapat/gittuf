@@ -95,7 +95,6 @@ gittuf version
 
 To build from source, clone the repository and run
 `make`. This will also run the test suite prior to installing gittuf. Note that
-git clone https://github.com/gittuf/gittuf
 Go 1.22 or higher is necessary to build gittuf.
 
 ```sh
