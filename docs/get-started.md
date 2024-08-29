@@ -42,7 +42,7 @@ cosign verify-blob \
     --certificate-identity https://github.com/gittuf/gittuf/.github/workflows/release.yml@refs/tags/v${VERSION} \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     gittuf_${VERSION}_${OS}_${ARCH}
-   
+
 sudo install gittuf_${VERSION}_${OS}_${ARCH} /usr/local/bin/gittuf
 cd -
 gittuf version
@@ -76,11 +76,6 @@ let it be accessible from across the system as a recognized command:
 cp .\gittuf_${VERSION}_windows_${ARCH}.exe $env:GOPATH\bin\gittuf.exe
 gittuf version
 ```
-
-> [!NOTE]
-> This Windows installation guideline assumes that Go has been properly installed
-> on the system (including setting proper environment variables). To install Go
-> properly on Windows, please refer to our [Go for Windows document]. 
 
 ### Building from source
 
