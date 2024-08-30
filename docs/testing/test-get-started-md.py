@@ -9,10 +9,16 @@ import subprocess
 import sys
 import tempfile
 import difflib
+import stat
 
 REQUIRED_BINARIES = ["git", "gittuf", "ssh-keygen"]
 SNIPPET_PATTERN = r"```bash\n([\s\S]*?)\n```"
-EXPECTED_OUTPUT_FILENAME = "tester-expected-unix.txt"
+if platform.system() == "Windows":
+    EXPECTED_OUTPUT_FILENAME = "tester-expected-win.txt"
+    SHELL = "powershell.exe"
+else:
+    EXPECTED_OUTPUT_FILENAME = "tester-expected-unix.txt"
+    SHELL = "/bin/bash"
 GET_STARTED_FILENAME = "get-started.md"
 
 # Validate that we have all the binaries required to run the test commands
@@ -21,6 +27,29 @@ def check_binaries():
         if not shutil.which(p):
             raise Exception(f"required command {p} not found")
 
+
+# This is required for deleting the directory on Windows
+def remove_readonly(func, path, _):
+    """Clear the readonly attribute and retry the operation."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+# Replacements for some bash commands to work in PowerShell
+def powershellify(cmds):
+    for i in range(len(cmds)):
+        # chaining commands in PowerShell works with ; instead of &&.
+        cmds[i] = cmds[i].replace("&&", ";")
+
+        # mkdir generates output in PowerShell, redirecting that to null
+        if "mkdir" in cmds[i]:
+            cmds[i] = re.sub(r'(mkdir\s+[a-zA-Z0-9-]+)', r'\1 > $null', cmds[i])
+
+        # quotes work differently in PowerShell, and the -N "" in the
+        # documentation causes ssh-keygen to break down in PowerShell.
+        # This can be solved by encapsulating the "" in single quotes like such:
+        if "ssh-keygen" in cmds[i]:
+            cmds[i] = cmds[i].replace('-N ""', "-N '\"\"'")
+    return cmds
 
 def test_commands():
     curr_path = os.getcwd()
@@ -31,13 +60,11 @@ def test_commands():
 
     # Check for supported platform
     match platform.system():
-        case "Linux" | "Darwin":
+        case "Linux" | "Darwin" | "Windows":
             expected_output_file = os.path.realpath(os.path.join(testing_path, EXPECTED_OUTPUT_FILENAME))
-        case "Windows":
-            raise SystemExit("Windows is not supported at this time.")
         case _:
             raise SystemExit("Unknown platform.")
-    
+
     # Prepare temporary directory
     tmp_dir = os.path.realpath(tempfile.mkdtemp())
     os.chdir(tmp_dir)
@@ -51,7 +78,11 @@ def test_commands():
 
             # Prepend the set command to echo commands and exit in case of
             # failure
-            script = "\nset -xe\n{}".format("\n".join(snippets))
+            if platform.system() == "Windows":
+                snippets = powershellify(snippets)
+                script = "\nSet-PSDebug -Trace 1\n {}".format("\n".join(snippets))
+            else:
+                script = "\nset -xe\n{}".format("\n".join(snippets))
             script += "\ngittuf verify-ref main" # Workaround for non-deterministic hashes
 
             # Set some environment variables to control commit creation
@@ -66,7 +97,7 @@ def test_commands():
 
             # Execute generated script
             proc = subprocess.Popen(
-                ["/bin/bash", "-c", script],
+                [SHELL, "-c", script],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 universal_newlines=True, env=cmd_env)
             stdout, _ = proc.communicate()
@@ -79,11 +110,11 @@ def test_commands():
                 raise SystemExit("Testing failed due to unexpected output:\n {}".format("\n".join(difflist)))
             else:
                 print("Testing completed successfully.")
-                        
+
     finally:
         # Cleanup
         os.chdir(curr_path)
-        shutil.rmtree(tmp_dir)
+        shutil.rmtree(tmp_dir, onerror=remove_readonly)
 
 if __name__ == "__main__":
     check_binaries()
