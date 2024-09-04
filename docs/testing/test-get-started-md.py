@@ -72,7 +72,8 @@ def test_commands():
     try:
         with open(expected_output_file) as fp1, open(get_started_file) as fp2:
             # Read in the get_started.md and expected output files
-            expected_output = fp1.read().replace('\r\n', '')
+            expected_output = fp1.read()
+            expected_output = re.sub(r'[\r\n]', '', expected_output)
             get_started = fp2.read()
             snippets = re.findall(SNIPPET_PATTERN, get_started)
 
@@ -103,7 +104,7 @@ def test_commands():
             stdout, _ = proc.communicate()
 
             # remove line breaks
-            stdout = stdout.replace('\r\n', '')
+            stdout = re.sub(r'[\r\n]', '', stdout)
             # Compare and notify user of result
             if stdout != expected_output:
                 difflist = list(difflib.Differ().compare(
