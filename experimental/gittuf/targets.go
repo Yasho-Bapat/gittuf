@@ -30,12 +30,7 @@ func (r *Repository) InitializeTargets(ctx context.Context, signer sslibdsse.Sig
 	}
 
 	slog.Debug("Loading current policy...")
-	var state *policy.State
-	if targetsRoleName == policy.HooksRoleName {
-		state, err = policy.LoadCurrentState(ctx, r.r, policy.HooksRef)
-	} else {
-		state, err = policy.LoadCurrentState(ctx, r.r, policy.PolicyStagingRef)
-	}
+	state, err := policy.LoadCurrentState(ctx, r.r, policy.PolicyStagingRef)
 	if err != nil {
 		return err
 	}

@@ -5,13 +5,13 @@ package cmd
 import (
 	"context"
 	"fmt"
+	rslopts "github.com/gittuf/gittuf/experimental/gittuf/options/rsl"
 	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/gittuf/gittuf/experimental/gittuf"
 	"github.com/gittuf/gittuf/internal/gittuf-git/args"
-	"github.com/gittuf/gittuf/internal/repository"
-	rslopts "github.com/gittuf/gittuf/internal/repository/options/rsl"
 	"github.com/gittuf/gittuf/internal/tuf"
 )
 
@@ -32,7 +32,7 @@ func Clone(gitArgs args.Args) error {
 		dir = ""
 	}
 
-	_, err := repository.Clone(context.Background(), gitArgs.Parameters[0], dir, "", []*tuf.Key{})
+	_, err := gittuf.Clone(context.Background(), gitArgs.Parameters[0], dir, "", []tuf.Principal{})
 	return err
 }
 
@@ -47,7 +47,7 @@ func SyncWithRemote(gitArgs args.Args) error {
 
 	if gitArgs.Command == "push" {
 		// Record changes to RSL
-		repo, err := repository.LoadRepository()
+		repo, err := gittuf.LoadRepository()
 		if err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func Commit(gitArgs args.Args) error {
 	}
 
 	// verify policy
-	repo, err := repository.LoadRepository()
+	repo, err := gittuf.LoadRepository()
 	if err != nil {
 		return err
 	}
