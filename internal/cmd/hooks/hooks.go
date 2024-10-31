@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"github.com/gittuf/gittuf/internal/cmd/hooks/add"
 	i "github.com/gittuf/gittuf/internal/cmd/hooks/init"
 	"github.com/gittuf/gittuf/internal/cmd/policy/persistent"
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ func New() *cobra.Command {
 	o.AddPersistentFlags(cmd)
 
 	cmd.AddCommand(i.New(o))
+	cmd.AddCommand(add.New())
 
 	return cmd
 }

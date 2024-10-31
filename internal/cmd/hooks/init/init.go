@@ -44,7 +44,7 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("failed to load hooks: %w", err)
 		}
 	}
-	return state.Commit(r, hooks.DefaultCommitMessage, true)
+	return state.Init(r, hooks.DefaultCommitMessage, true)
 }
 
 func New(persistent *persistent.Options) *cobra.Command {

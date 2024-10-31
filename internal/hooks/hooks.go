@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +12,11 @@ import (
 	"github.com/gittuf/gittuf/internal/signerverifier/dsse"
 	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	"github.com/gittuf/gittuf/internal/tuf"
-	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
+	"io/ioutil"
 	"log/slog"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -23,6 +26,9 @@ const (
 	RootRoleName          = "root"
 	TargetsRoleName       = "targets"
 	metadataTreeEntryName = "metadata"
+	HooksDir              = ".gittuf/hooks"
+	hooksTreeEntryName    = "hooks"
+	hooksRoleName         = "hooks"
 )
 
 var (
@@ -46,19 +52,23 @@ var (
 type StateWrapper struct {
 	RootEnvelope        *sslibdsse.Envelope
 	TargetsEnvelope     *sslibdsse.Envelope
+	HooksEnvelope       *sslibdsse.Envelope
 	DelegationEnvelopes map[string]*sslibdsse.Envelope
 	RootPublicKeys      []tuf.Principal
 	repository          *gitinterface.Repository
 }
 
-type HooksState struct {
-	RootEnvelope        *sslibdsse.Envelope
-	TargetsEnvelope     *sslibdsse.Envelope
-	DelegationEnvelopes map[string]*sslibdsse.Envelope
-	RootPublicKeys      []tuf.Principal
-	repository          *gitinterface.Repository
+type HooksMetadata struct {
+	HooksInfo *HooksInformation   `json:"HooksInfo"`
+	Bindings  map[string][]string `json:"Bindings"`
 }
 
+type HooksInformation struct {
+	SHA256Hash []byte   `json:"SHA256Hash"`
+	BlobID     []byte   `json:"BlobID"`
+	Stage      string   `json:"Stage"`
+	Branches   []string `json:"Branches"`
+}
 type searcher interface {
 	FindHooksEntryFor(entry rsl.Entry) (*rsl.ReferenceEntry, error)
 	FindFirstHooksEntry() (*rsl.ReferenceEntry, error)
@@ -103,19 +113,6 @@ func (r *regularSearcher) FindFirstHooksEntry() (*rsl.ReferenceEntry, error) {
 	}
 
 	return entry, nil
-}
-
-func (s *StateWrapper) GetRootMetadata() (tuf.RootMetadata, error) {
-	payloadBytes, err := s.RootEnvelope.DecodeB64Payload()
-	if err != nil {
-		return nil, err
-	}
-
-	rootMetadata := &tufv01.RootMetadata{}
-	if err := json.Unmarshal(payloadBytes, rootMetadata); err != nil {
-		return nil, err
-	}
-	return rootMetadata, nil
 }
 
 func loadStateForEntry(repo *gitinterface.Repository, entry *rsl.ReferenceEntry) (*StateWrapper, error) {
@@ -167,16 +164,6 @@ func loadStateForEntry(repo *gitinterface.Repository, entry *rsl.ReferenceEntry)
 			}
 		}
 	}
-	rootMetadata, err := state.GetRootMetadata()
-	if err != nil {
-		return nil, err
-	}
-
-	rootPrincipals, err := rootMetadata.GetRootPrincipals()
-	if err != nil {
-		return nil, err
-	}
-	state.RootPublicKeys = rootPrincipals
 
 	return state, nil
 }
@@ -228,7 +215,14 @@ func LoadFirstState(ctx context.Context, repo *gitinterface.Repository) (*StateW
 	}
 	return LoadState(ctx, repo, firstEntry)
 }
-func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage string, signCommit bool) error {
+
+func InitializeHooksMetadata() *HooksMetadata {
+	return &HooksMetadata{HooksInfo: &HooksInformation{}}
+}
+
+// todo: change this to be more general, i.e. things like init hooks/targets metadata should go to another function
+// todo: maybe titled "init" or something, and the initialize hooks/targets metadata should change to get
+func (s *StateWrapper) Init(repo *gitinterface.Repository, commitMessage string, signCommit bool) error {
 	if len(commitMessage) == 0 {
 		commitMessage = DefaultCommitMessage
 	}
@@ -236,8 +230,16 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage strin
 	metadata := map[string]*sslibdsse.Envelope{}
 	targetsMetadata := policy.InitializeTargetsMetadata()
 	env, err := dsse.CreateEnvelope(targetsMetadata)
+	if err != nil {
+		return err
+	}
+	s.TargetsEnvelope = env
 	metadata[TargetsRoleName] = env
 
+	hooksMetadata := InitializeHooksMetadata()
+	env, err = dsse.CreateEnvelope(hooksMetadata)
+	s.HooksEnvelope = env
+	metadata[hooksRoleName] = env
 	// What do s.DelegationEnvelopes do?
 
 	allTreeEntries := map[string]gitinterface.Hash{}
@@ -256,6 +258,31 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage strin
 		allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
 	}
 
+	return s.Commit(repo, allTreeEntries, commitMessage, signCommit)
+}
+
+func (s *StateWrapper) GetHooksMetadata() (*HooksMetadata, error) {
+	h := s.HooksEnvelope
+	if h == nil {
+		slog.Debug("Could not find requested metadata file; initializing hooks metadata")
+		metadata := InitializeHooksMetadata()
+		return metadata, nil
+	}
+
+	payloadBytes, err := h.DecodeB64Payload()
+	if err != nil {
+		return nil, err
+	}
+
+	hooksMetadata := &HooksMetadata{}
+	if err = json.Unmarshal(payloadBytes, hooksMetadata); err != nil {
+		return nil, err
+	}
+
+	return hooksMetadata, nil
+}
+
+func (s *StateWrapper) Commit(repo *gitinterface.Repository, allTreeEntries map[string]gitinterface.Hash, commitMessage string, sign bool) error {
 	treeBuilder := gitinterface.NewTreeBuilder(repo)
 	hooksRootTreeID, err := treeBuilder.WriteRootTreeFromBlobIDs(allTreeEntries)
 	if err != nil {
@@ -268,15 +295,14 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage strin
 			return err
 		}
 	}
-
-	commitID, err := repo.Commit(hooksRootTreeID, HooksRef, commitMessage, signCommit)
+	commitID, err := repo.Commit(hooksRootTreeID, HooksRef, commitMessage, sign)
 	if err != nil {
 		return err
 	}
 
 	// record changes to RSL
 	newReferenceEntry := rsl.NewReferenceEntry(HooksRef, commitID)
-	if err := newReferenceEntry.Commit(repo, signCommit); err != nil {
+	if err := newReferenceEntry.Commit(repo, true); err != nil {
 		if !originalCommitID.IsZero() {
 			return repo.ResetDueToError(err, HooksRef, originalCommitID)
 		}
@@ -284,4 +310,72 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage strin
 		return err
 	}
 	return nil
+}
+
+func (s *StateWrapper) Add(repo *gitinterface.Repository, hooksFilePath, stage, hookName string) error {
+	// this function will copy files and their metadata information to HooksDir.
+	// gittuf hooks commit will commit all the files and wipe? from this directory.
+
+	hookFile, err := os.Open(hooksFilePath)
+	if err != nil {
+		return err
+	}
+	defer hookFile.Close()
+
+	allTreeEntries := map[string]gitinterface.Hash{}
+
+	hookFileContents, err := ioutil.ReadAll(hookFile)
+	blobID, err := repo.WriteBlob(hookFileContents)
+	if err != nil {
+		return err
+	}
+
+	if hookName == "default" {
+		hookName = filepath.Base(hooksFilePath)
+	}
+
+	allTreeEntries[path.Join(hooksTreeEntryName, filepath.Base(hooksFilePath))] = blobID
+
+	// calculate hash to send to s.GenerateMetadataFor
+	sha256Hash := sha256.New()
+	sha256Hash.Write(hookFileContents)
+	sha256HashSum := sha256Hash.Sum(nil)
+
+	updatedHooksMetadata, err := s.GenerateMetadataFor(repo, "default hook", stage, blobID, sha256HashSum)
+	if err != nil {
+		return err
+	}
+	// todo: encode updatedHooksMetadata using WriteBlob to include in the worktree and call repo.Init on
+	metadata := map[string]*sslibdsse.Envelope{}
+	env, err := dsse.CreateEnvelope(updatedHooksMetadata)
+	s.HooksEnvelope = env
+	metadata[hooksRoleName] = env
+
+	envContents, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+
+	blobID, err = repo.WriteBlob(envContents)
+	if err != nil {
+		return err
+	}
+	name := "hooks"
+	allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
+	commitMessage := "Add" + hookName
+
+	return s.Commit(repo, allTreeEntries, commitMessage, true)
+}
+
+func (s *StateWrapper) GenerateMetadataFor(repo *gitinterface.Repository, hookName, stage string, blobID, sha256HashSum gitinterface.Hash) (*HooksMetadata, error) {
+	currentMetadata, err := s.GetHooksMetadata()
+	if err != nil {
+		return nil, err
+	}
+	// todo: this is currently rewriting the metadata -> you want to add to a list of new metadata
+	currentMetadata.HooksInfo.SHA256Hash = sha256HashSum
+	currentMetadata.HooksInfo.Stage = stage
+	currentMetadata.HooksInfo.BlobID = blobID
+	// todo: here, add information about the branchID and overall Binding datastructure.
+	return currentMetadata, nil
 }
