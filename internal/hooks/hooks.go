@@ -59,8 +59,8 @@ type StateWrapper struct {
 }
 
 type HooksMetadata struct {
-	HooksInfo *HooksInformation   `json:"HooksInfo"`
-	Bindings  map[string][]string `json:"Bindings"`
+	HooksInfo map[string]*HooksInformation `json:"HooksInfo"`
+	Bindings  map[string][]string          `json:"Bindings"`
 }
 
 type HooksInformation struct {
@@ -113,6 +113,15 @@ func (r *regularSearcher) FindFirstHooksEntry() (*rsl.ReferenceEntry, error) {
 	}
 
 	return entry, nil
+}
+
+func (r *regularSearcher) FindHooksEntriesInRange(firstEntry, lastEntry rsl.Entry) ([]*rsl.ReferenceEntry, error) {
+	allPolicyEntries, _, err := rsl.GetReferenceEntriesInRangeForRef(r.repo, firstEntry.GetID(), lastEntry.GetID(), HooksRef)
+	if err != nil {
+		return nil, err
+	}
+
+	return allPolicyEntries, nil
 }
 
 func loadStateForEntry(repo *gitinterface.Repository, entry *rsl.ReferenceEntry) (*StateWrapper, error) {
@@ -172,7 +181,7 @@ func LoadState(ctx context.Context, repo *gitinterface.Repository, requestedEntr
 	searcher := newSearcher(repo)
 	firstHooksEntry, err := searcher.FindFirstHooksEntry()
 	if err != nil {
-		if errors.Is(err, rsl.ErrRSLEntryNotFound) {
+		if errors.Is(err, ErrPolicyNotFound) {
 			return loadStateForEntry(repo, requestedEntry)
 		}
 		return nil, err
@@ -183,6 +192,7 @@ func LoadState(ctx context.Context, repo *gitinterface.Repository, requestedEntr
 		return nil, err
 	}
 	if knows {
+		slog.Debug("knows")
 		return loadStateForEntry(repo, requestedEntry)
 	}
 
@@ -191,14 +201,10 @@ func LoadState(ctx context.Context, repo *gitinterface.Repository, requestedEntr
 		return nil, err
 	}
 
-	// TODO: skipping for now
-	//if err := initialHooksState.Verify(ctx); err != nil {
-	//	return nil, fmt.Errorf("requested state has invalidly signed metadata: %w", err)
-	//}
 	return initialHooksState, nil
 }
 
-func LoadCurrentState(ctx context.Context, repo *gitinterface.Repository, ref string) (*StateWrapper, error) {
+func LoadCurrentState(ctx context.Context, repo *gitinterface.Repository) (*StateWrapper, error) {
 	entry, _, err := rsl.GetLatestReferenceEntry(repo, rsl.ForReference(HooksRef))
 	if err != nil {
 		return nil, err
@@ -217,7 +223,7 @@ func LoadFirstState(ctx context.Context, repo *gitinterface.Repository) (*StateW
 }
 
 func InitializeHooksMetadata() *HooksMetadata {
-	return &HooksMetadata{HooksInfo: &HooksInformation{}}
+	return &HooksMetadata{HooksInfo: make(map[string]*HooksInformation)}
 }
 
 // todo: change this to be more general, i.e. things like init hooks/targets metadata should go to another function
@@ -233,12 +239,10 @@ func (s *StateWrapper) Init(repo *gitinterface.Repository, commitMessage string,
 	if err != nil {
 		return err
 	}
-	s.TargetsEnvelope = env
 	metadata[TargetsRoleName] = env
 
 	hooksMetadata := InitializeHooksMetadata()
 	env, err = dsse.CreateEnvelope(hooksMetadata)
-	s.HooksEnvelope = env
 	metadata[hooksRoleName] = env
 	// What do s.DelegationEnvelopes do?
 
@@ -309,6 +313,7 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, allTreeEntries map[
 
 		return err
 	}
+	slog.Debug("RSL entry recording successful.")
 	return nil
 }
 
@@ -341,14 +346,13 @@ func (s *StateWrapper) Add(repo *gitinterface.Repository, hooksFilePath, stage, 
 	sha256Hash.Write(hookFileContents)
 	sha256HashSum := sha256Hash.Sum(nil)
 
-	updatedHooksMetadata, err := s.GenerateMetadataFor(repo, "default hook", stage, blobID, sha256HashSum)
+	updatedHooksMetadata, err := s.GenerateMetadataFor(repo, hookName, stage, blobID, sha256HashSum)
 	if err != nil {
 		return err
 	}
 	// todo: encode updatedHooksMetadata using WriteBlob to include in the worktree and call repo.Init on
 	metadata := map[string]*sslibdsse.Envelope{}
 	env, err := dsse.CreateEnvelope(updatedHooksMetadata)
-	s.HooksEnvelope = env
 	metadata[hooksRoleName] = env
 
 	envContents, err := json.Marshal(env)
@@ -372,10 +376,13 @@ func (s *StateWrapper) GenerateMetadataFor(repo *gitinterface.Repository, hookNa
 	if err != nil {
 		return nil, err
 	}
+	hookInfo := &HooksInformation{
+		SHA256Hash: sha256HashSum,
+		Stage:      stage,
+		BlobID:     blobID,
+	}
 	// todo: this is currently rewriting the metadata -> you want to add to a list of new metadata
-	currentMetadata.HooksInfo.SHA256Hash = sha256HashSum
-	currentMetadata.HooksInfo.Stage = stage
-	currentMetadata.HooksInfo.BlobID = blobID
+	currentMetadata.HooksInfo[hookName] = hookInfo
 	// todo: here, add information about the branchID and overall Binding datastructure.
 	return currentMetadata, nil
 }

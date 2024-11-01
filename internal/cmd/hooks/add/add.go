@@ -75,7 +75,7 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	state, err := hooks.LoadCurrentState(context.Background(), r, hooks.HooksRef)
+	state, err := hooks.LoadCurrentState(context.Background(), r)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
