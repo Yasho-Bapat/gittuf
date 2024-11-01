@@ -346,43 +346,52 @@ func (s *StateWrapper) Add(repo *gitinterface.Repository, hooksFilePath, stage, 
 	sha256Hash.Write(hookFileContents)
 	sha256HashSum := sha256Hash.Sum(nil)
 
-	updatedHooksMetadata, err := s.GenerateMetadataFor(repo, hookName, stage, blobID, sha256HashSum)
+	updatedHooksMetadata, err := s.GetHooksMetadata()
 	if err != nil {
 		return err
 	}
+
+	if err := updatedHooksMetadata.GenerateMetadataFor(repo, hookName, stage, blobID, sha256HashSum); err != nil {
+		return err
+	}
+	fmt.Println(updatedHooksMetadata)
+
 	// todo: encode updatedHooksMetadata using WriteBlob to include in the worktree and call repo.Init on
 	metadata := map[string]*sslibdsse.Envelope{}
 	env, err := dsse.CreateEnvelope(updatedHooksMetadata)
+	s.HooksEnvelope = env
 	metadata[hooksRoleName] = env
 
-	envContents, err := json.Marshal(env)
-	if err != nil {
-		return err
-	}
+	for name, env := range metadata {
+		envContents, err := json.Marshal(env)
+		if err != nil {
+			return err
+		}
 
-	blobID, err = repo.WriteBlob(envContents)
-	if err != nil {
-		return err
+		blobID, err = repo.WriteBlob(envContents)
+		if err != nil {
+			return err
+		}
+		allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
 	}
-	name := "hooks"
-	allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
 	commitMessage := "Add" + hookName
 
+	hooksTip, err := repo.GetReference(HooksRef)
+	if err := repo.SetReference(HooksRef, hooksTip); err != nil {
+		return fmt.Errorf("failed to set new hooks reference: %w", err)
+	}
 	return s.Commit(repo, allTreeEntries, commitMessage, true)
 }
 
-func (s *StateWrapper) GenerateMetadataFor(repo *gitinterface.Repository, hookName, stage string, blobID, sha256HashSum gitinterface.Hash) (*HooksMetadata, error) {
-	currentMetadata, err := s.GetHooksMetadata()
-	if err != nil {
-		return nil, err
-	}
+func (h *HooksMetadata) GenerateMetadataFor(repo *gitinterface.Repository, hookName, stage string, blobID, sha256HashSum gitinterface.Hash) error {
+
 	hookInfo := &HooksInformation{
 		SHA256Hash: sha256HashSum,
 		Stage:      stage,
 		BlobID:     blobID,
 	}
 	// todo: this is currently rewriting the metadata -> you want to add to a list of new metadata
-	currentMetadata.HooksInfo[hookName] = hookInfo
+	h.HooksInfo[hookName] = hookInfo
 	// todo: here, add information about the branchID and overall Binding datastructure.
-	return currentMetadata, nil
+	return nil
 }
