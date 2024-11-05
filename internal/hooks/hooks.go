@@ -67,8 +67,8 @@ type HooksMetadata struct {
 }
 
 type HooksInformation struct {
-	SHA256Hash []byte   `json:"SHA256Hash"`
-	BlobID     []byte   `json:"BlobID"`
+	SHA256Hash string   `json:"SHA256Hash"`
+	BlobID     string   `json:"BlobID"`
 	Stage      string   `json:"Stage"`
 	Branches   []string `json:"Branches"`
 }
@@ -323,9 +323,9 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage, hook
 
 func (h *HooksMetadata) GenerateMetadataFor(hookName, stage string, blobID, sha256HashSum gitinterface.Hash) error {
 	hookInfo := HooksInformation{
-		SHA256Hash: sha256HashSum,
+		SHA256Hash: sha256HashSum.String(),
 		Stage:      stage,
-		BlobID:     blobID,
+		BlobID:     blobID.String(),
 	}
 	h.HooksInfo[hookName] = &hookInfo
 
