@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/gittuf/gittuf/internal/rsl"
 	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
+	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
 
 	//"crypto/sha256"
 	"encoding/json"
@@ -32,6 +33,7 @@ const (
 	HooksDir              = ".gittuf/hooks"
 	hooksTreeEntryName    = "hooks"
 	HooksRoleName         = "hooks"
+	ApplyMessage          = "Apply hooks"
 )
 
 var (
@@ -330,4 +332,31 @@ func (h *HooksMetadata) GenerateMetadataFor(hookName, stage string, blobID, sha2
 	h.HooksInfo[hookName] = &hookInfo
 
 	return nil
+}
+
+func (s *StateWrapper) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata, error) {
+	e := s.TargetsEnvelope
+	if roleName != TargetsRoleName {
+		env, ok := s.DelegationEnvelopes[roleName]
+		if !ok {
+			return nil, ErrMetadataNotFound
+		}
+		e = env
+	}
+
+	if e == nil {
+		return nil, ErrMetadataNotFound
+	}
+
+	payloadBytes, err := e.DecodeB64Payload()
+	if err != nil {
+		return nil, err
+	}
+
+	targetsMetadata := &tufv01.TargetsMetadata{}
+	if err := json.Unmarshal(payloadBytes, targetsMetadata); err != nil {
+		return nil, err
+	}
+
+	return targetsMetadata, nil
 }

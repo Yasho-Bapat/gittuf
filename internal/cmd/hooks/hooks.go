@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"github.com/gittuf/gittuf/internal/cmd/hooks/add"
+	"github.com/gittuf/gittuf/internal/cmd/hooks/apply"
 	i "github.com/gittuf/gittuf/internal/cmd/hooks/init"
 	"github.com/gittuf/gittuf/internal/cmd/policy/persistent"
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ func New() *cobra.Command {
 
 	cmd.AddCommand(i.New(o))
 	cmd.AddCommand(add.New())
+	cmd.AddCommand(apply.New())
 
 	return cmd
 }

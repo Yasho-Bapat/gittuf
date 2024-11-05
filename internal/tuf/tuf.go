@@ -5,6 +5,7 @@ package tuf
 
 import (
 	"errors"
+	"github.com/gittuf/gittuf/internal/gitinterface"
 
 	"github.com/gittuf/gittuf/internal/common/set"
 	"github.com/secure-systems-lab/go-securesystemslib/signerverifier"
@@ -122,6 +123,7 @@ type TargetsMetadata interface {
 	// unenforced
 	SetExpires(expiry string)
 
+	SetHooksField(hooksID gitinterface.Hash)
 	// SchemaVersion returns the metadata schema version.
 	SchemaVersion() string
 
