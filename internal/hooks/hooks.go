@@ -2,21 +2,24 @@ package hooks
 
 import (
 	"context"
-	"crypto/sha256"
+	"github.com/gittuf/gittuf/internal/rsl"
+	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
+
+	//"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gittuf/gittuf/internal/gitinterface"
-	"github.com/gittuf/gittuf/internal/policy"
-	"github.com/gittuf/gittuf/internal/rsl"
-	"github.com/gittuf/gittuf/internal/signerverifier/dsse"
-	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
+	//"github.com/gittuf/gittuf/internal/policy"
+	//"github.com/gittuf/gittuf/internal/rsl"
+	//"github.com/gittuf/gittuf/internal/signerverifier/dsse"
+	//sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	"github.com/gittuf/gittuf/internal/tuf"
-	"io/ioutil"
+	//"io/ioutil"
 	"log/slog"
-	"os"
+	//"os"
 	"path"
-	"path/filepath"
+	//"path/filepath"
 	"strings"
 )
 
@@ -28,7 +31,7 @@ const (
 	metadataTreeEntryName = "metadata"
 	HooksDir              = ".gittuf/hooks"
 	hooksTreeEntryName    = "hooks"
-	hooksRoleName         = "hooks"
+	HooksRoleName         = "hooks"
 )
 
 var (
@@ -69,6 +72,7 @@ type HooksInformation struct {
 	Stage      string   `json:"Stage"`
 	Branches   []string `json:"Branches"`
 }
+
 type searcher interface {
 	FindHooksEntryFor(entry rsl.Entry) (*rsl.ReferenceEntry, error)
 	FindFirstHooksEntry() (*rsl.ReferenceEntry, error)
@@ -164,6 +168,8 @@ func loadStateForEntry(repo *gitinterface.Repository, entry *rsl.ReferenceEntry)
 			case fmt.Sprintf("%s.json", TargetsRoleName):
 				state.TargetsEnvelope = env
 
+			case fmt.Sprintf("%s.json", HooksRoleName):
+				state.HooksEnvelope = env
 			default:
 				if state.DelegationEnvelopes == nil {
 					state.DelegationEnvelopes = map[string]*sslibdsse.Envelope{}
@@ -177,7 +183,7 @@ func loadStateForEntry(repo *gitinterface.Repository, entry *rsl.ReferenceEntry)
 	return state, nil
 }
 
-func LoadState(ctx context.Context, repo *gitinterface.Repository, requestedEntry *rsl.ReferenceEntry) (*StateWrapper, error) {
+func LoadState(repo *gitinterface.Repository, requestedEntry *rsl.ReferenceEntry) (*StateWrapper, error) {
 	searcher := newSearcher(repo)
 	firstHooksEntry, err := searcher.FindFirstHooksEntry()
 	if err != nil {
@@ -186,8 +192,7 @@ func LoadState(ctx context.Context, repo *gitinterface.Repository, requestedEntr
 		}
 		return nil, err
 	}
-
-	knows, err := repo.KnowsCommit(firstHooksEntry.ID, requestedEntry.ID)
+	knows, err := repo.KnowsCommit(requestedEntry.ID, firstHooksEntry.ID) // this is the problem
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +214,7 @@ func LoadCurrentState(ctx context.Context, repo *gitinterface.Repository) (*Stat
 	if err != nil {
 		return nil, err
 	}
-	return LoadState(ctx, repo, entry)
+	return LoadState(repo, entry)
 }
 
 // LoadFirstState returns the State corresponding to the first Hooks commit.
@@ -219,35 +224,48 @@ func LoadFirstState(ctx context.Context, repo *gitinterface.Repository) (*StateW
 	if err != nil {
 		return nil, err
 	}
-	return LoadState(ctx, repo, firstEntry)
+	return LoadState(repo, firstEntry)
 }
 
-func InitializeHooksMetadata() *HooksMetadata {
-	return &HooksMetadata{HooksInfo: make(map[string]*HooksInformation)}
+func InitializeHooksMetadata() HooksMetadata {
+	return HooksMetadata{HooksInfo: make(map[string]*HooksInformation)}
 }
 
-// todo: change this to be more general, i.e. things like init hooks/targets metadata should go to another function
-// todo: maybe titled "init" or something, and the initialize hooks/targets metadata should change to get
-func (s *StateWrapper) Init(repo *gitinterface.Repository, commitMessage string, signCommit bool) error {
+func (s *StateWrapper) GetHooksMetadata() (*HooksMetadata, error) {
+	h := s.HooksEnvelope
+	if h == nil {
+		slog.Debug("Could not find requested metadata file; initializing hooks metadata")
+		return nil, ErrMetadataNotFound
+	}
+
+	payloadBytes, err := h.DecodeB64Payload()
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug(string(payloadBytes))
+	hooksMetadata := &HooksMetadata{}
+	if err := json.Unmarshal(payloadBytes, hooksMetadata); err != nil {
+		return nil, err
+	}
+
+	return hooksMetadata, nil
+}
+
+func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage, hookName string, addBlob gitinterface.Hash, sign bool) error {
 	if len(commitMessage) == 0 {
 		commitMessage = DefaultCommitMessage
 	}
 
 	metadata := map[string]*sslibdsse.Envelope{}
-	targetsMetadata := policy.InitializeTargetsMetadata()
-	env, err := dsse.CreateEnvelope(targetsMetadata)
-	if err != nil {
-		return err
+	if s.TargetsEnvelope != nil {
+		metadata[TargetsRoleName] = s.TargetsEnvelope
 	}
-	metadata[TargetsRoleName] = env
-
-	hooksMetadata := InitializeHooksMetadata()
-	env, err = dsse.CreateEnvelope(hooksMetadata)
-	metadata[hooksRoleName] = env
-	// What do s.DelegationEnvelopes do?
+	if s.HooksEnvelope != nil {
+		metadata[HooksRoleName] = s.HooksEnvelope
+	}
 
 	allTreeEntries := map[string]gitinterface.Hash{}
-
 	for name, env := range metadata {
 		envContents, err := json.Marshal(env)
 		if err != nil {
@@ -262,32 +280,13 @@ func (s *StateWrapper) Init(repo *gitinterface.Repository, commitMessage string,
 		allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
 	}
 
-	return s.Commit(repo, allTreeEntries, commitMessage, signCommit)
-}
-
-func (s *StateWrapper) GetHooksMetadata() (*HooksMetadata, error) {
-	h := s.HooksEnvelope
-	if h == nil {
-		slog.Debug("Could not find requested metadata file; initializing hooks metadata")
-		metadata := InitializeHooksMetadata()
-		return metadata, nil
+	if len(addBlob) > 0 {
+		allTreeEntries[path.Join(hooksTreeEntryName, hookName)] = addBlob
 	}
 
-	payloadBytes, err := h.DecodeB64Payload()
-	if err != nil {
-		return nil, err
-	}
-
-	hooksMetadata := &HooksMetadata{}
-	if err = json.Unmarshal(payloadBytes, hooksMetadata); err != nil {
-		return nil, err
-	}
-
-	return hooksMetadata, nil
-}
-
-func (s *StateWrapper) Commit(repo *gitinterface.Repository, allTreeEntries map[string]gitinterface.Hash, commitMessage string, sign bool) error {
+	slog.Debug("building and populating new tree...")
 	treeBuilder := gitinterface.NewTreeBuilder(repo)
+
 	hooksRootTreeID, err := treeBuilder.WriteRootTreeFromBlobIDs(allTreeEntries)
 	if err != nil {
 		return err
@@ -303,8 +302,9 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, allTreeEntries map[
 	if err != nil {
 		return err
 	}
+	slog.Debug("committing hooks metadata successful!")
+	// record changes to RSL; reset to original policy commit if err != nil
 
-	// record changes to RSL
 	newReferenceEntry := rsl.NewReferenceEntry(HooksRef, commitID)
 	if err := newReferenceEntry.Commit(repo, true); err != nil {
 		if !originalCommitID.IsZero() {
@@ -313,85 +313,21 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, allTreeEntries map[
 
 		return err
 	}
-	slog.Debug("RSL entry recording successful.")
-	return nil
-}
-
-func (s *StateWrapper) Add(repo *gitinterface.Repository, hooksFilePath, stage, hookName string) error {
-	// this function will copy files and their metadata information to HooksDir.
-	// gittuf hooks commit will commit all the files and wipe? from this directory.
-
-	hookFile, err := os.Open(hooksFilePath)
-	if err != nil {
-		return err
-	}
-	defer hookFile.Close()
-
-	allTreeEntries := map[string]gitinterface.Hash{}
-
-	hookFileContents, err := ioutil.ReadAll(hookFile)
-	blobID, err := repo.WriteBlob(hookFileContents)
-	if err != nil {
-		return err
-	}
-
-	if hookName == "default" {
-		hookName = filepath.Base(hooksFilePath)
-	}
-
-	allTreeEntries[path.Join(hooksTreeEntryName, filepath.Base(hooksFilePath))] = blobID
-
-	// calculate hash to send to s.GenerateMetadataFor
-	sha256Hash := sha256.New()
-	sha256Hash.Write(hookFileContents)
-	sha256HashSum := sha256Hash.Sum(nil)
-
-	updatedHooksMetadata, err := s.GetHooksMetadata()
-	if err != nil {
-		return err
-	}
-
-	if err := updatedHooksMetadata.GenerateMetadataFor(repo, hookName, stage, blobID, sha256HashSum); err != nil {
-		return err
-	}
-	fmt.Println(updatedHooksMetadata)
-
-	// todo: encode updatedHooksMetadata using WriteBlob to include in the worktree and call repo.Init on
-	metadata := map[string]*sslibdsse.Envelope{}
-	env, err := dsse.CreateEnvelope(updatedHooksMetadata)
-	s.HooksEnvelope = env
-	metadata[hooksRoleName] = env
-
-	for name, env := range metadata {
-		envContents, err := json.Marshal(env)
-		if err != nil {
-			return err
-		}
-
-		blobID, err = repo.WriteBlob(envContents)
-		if err != nil {
-			return err
-		}
-		allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
-	}
-	commitMessage := "Add" + hookName
-
+	slog.Debug("RSL entry recording successful!")
 	hooksTip, err := repo.GetReference(HooksRef)
 	if err := repo.SetReference(HooksRef, hooksTip); err != nil {
 		return fmt.Errorf("failed to set new hooks reference: %w", err)
 	}
-	return s.Commit(repo, allTreeEntries, commitMessage, true)
+	return nil
 }
 
-func (h *HooksMetadata) GenerateMetadataFor(repo *gitinterface.Repository, hookName, stage string, blobID, sha256HashSum gitinterface.Hash) error {
-
-	hookInfo := &HooksInformation{
+func (h *HooksMetadata) GenerateMetadataFor(hookName, stage string, blobID, sha256HashSum gitinterface.Hash) error {
+	hookInfo := HooksInformation{
 		SHA256Hash: sha256HashSum,
 		Stage:      stage,
 		BlobID:     blobID,
 	}
-	// todo: this is currently rewriting the metadata -> you want to add to a list of new metadata
-	h.HooksInfo[hookName] = hookInfo
-	// todo: here, add information about the branchID and overall Binding datastructure.
+	h.HooksInfo[hookName] = &hookInfo
+
 	return nil
 }

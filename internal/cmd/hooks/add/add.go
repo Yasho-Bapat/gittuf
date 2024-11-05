@@ -1,14 +1,8 @@
 package add
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"github.com/gittuf/gittuf/experimental/gittuf"
 	"github.com/gittuf/gittuf/internal/cmd/trust/persistent"
-	"github.com/gittuf/gittuf/internal/gitinterface"
-	"github.com/gittuf/gittuf/internal/hooks"
-	"github.com/gittuf/gittuf/internal/rsl"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +47,7 @@ func (o *options) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(
 		&o.hookname,
 		"hookname",
-		"default",
+		"",
 		"Name of the hook",
 	)
 }
@@ -64,25 +58,7 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// initialize policy
-	// add rule for protecting refs/gittuf/hooks
-
-	r := repo.GetGitRepository()
-	hooksTip, err := r.GetReference(hooks.HooksRef)
-	if err != nil {
-		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
-			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
-		}
-	}
-
-	state, err := hooks.LoadCurrentState(context.Background(), r)
-	if err != nil {
-		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
-			return fmt.Errorf("failed to load hooks: %w", err)
-		}
-	}
-
-	return state.Add(r, o.filepath, o.stage, o.hookname)
+	return repo.AddHooks(o.filepath, o.stage, o.hookname)
 }
 
 func New() *cobra.Command {
