@@ -1,7 +1,10 @@
-package hooks
+package gittuf
 
 import (
+	//"bytes"
 	"context"
+	//"crypto/sha256"
+	//"github.com/gittuf/gittuf/internal/policy"
 	"github.com/gittuf/gittuf/internal/rsl"
 	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
@@ -211,6 +214,8 @@ func LoadState(repo *gitinterface.Repository, requestedEntry *rsl.ReferenceEntry
 	return initialHooksState, nil
 }
 
+// LoadCurrentState returns the latest State corresponding to the Hooks ref.
+// Verification of RoT is skipped since it is the initial commit.
 func LoadCurrentState(ctx context.Context, repo *gitinterface.Repository) (*StateWrapper, error) {
 	entry, _, err := rsl.GetLatestReferenceEntry(repo, rsl.ForReference(HooksRef))
 	if err != nil {
@@ -221,18 +226,23 @@ func LoadCurrentState(ctx context.Context, repo *gitinterface.Repository) (*Stat
 
 // LoadFirstState returns the State corresponding to the first Hooks commit.
 // Verification of RoT is skipped since it is the initial commit.
-func LoadFirstState(ctx context.Context, repo *gitinterface.Repository) (*StateWrapper, error) {
+func LoadFirstState(repo *gitinterface.Repository) (*StateWrapper, error) {
+	fmt.Println(repo)
 	firstEntry, _, err := rsl.GetFirstReferenceEntryForRef(repo, HooksRef)
 	if err != nil {
 		return nil, err
 	}
+
 	return LoadState(repo, firstEntry)
 }
 
+// InitializeHooksMetadata creates the HooksMetadata object to be used to generate
+// the hooks metadata file.
 func InitializeHooksMetadata() HooksMetadata {
 	return HooksMetadata{HooksInfo: make(map[string]*HooksInformation)}
 }
 
+// GetHooksMetadata returns the hooks metadata associated with the state (s).
 func (s *StateWrapper) GetHooksMetadata() (*HooksMetadata, error) {
 	h := s.HooksEnvelope
 	if h == nil {
@@ -254,6 +264,23 @@ func (s *StateWrapper) GetHooksMetadata() (*HooksMetadata, error) {
 	return hooksMetadata, nil
 }
 
+// GenerateHooksMetadataFor populates the HooksMetadata object with information about this hook
+// including SHA256 hash, the stage at which it needs to be run (pre-commit, etc.) and the
+// BlobID - which will help in fetching the file contents upon usage.
+func (h *HooksMetadata) GenerateHooksMetadataFor(hookName, stage string, blobID, sha256HashSum gitinterface.Hash) error {
+	hookInfo := HooksInformation{
+		SHA256Hash: sha256HashSum.String(),
+		Stage:      stage,
+		BlobID:     blobID.String(),
+	}
+	h.HooksInfo[hookName] = &hookInfo
+
+	return nil
+}
+
+// Commit packages all information including the targets, hooks metadata and the actual hook
+// file (when provided), writes this to blobs and builds the tree using said blobs.
+// Commit also updates the RSL with this latest change.
 func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage, hookName string, addBlob gitinterface.Hash, sign bool) error {
 	if len(commitMessage) == 0 {
 		commitMessage = DefaultCommitMessage
@@ -323,17 +350,7 @@ func (s *StateWrapper) Commit(repo *gitinterface.Repository, commitMessage, hook
 	return nil
 }
 
-func (h *HooksMetadata) GenerateMetadataFor(hookName, stage string, blobID, sha256HashSum gitinterface.Hash) error {
-	hookInfo := HooksInformation{
-		SHA256Hash: sha256HashSum.String(),
-		Stage:      stage,
-		BlobID:     blobID.String(),
-	}
-	h.HooksInfo[hookName] = &hookInfo
-
-	return nil
-}
-
+// GetTargetsMetadata returns the Targets metadata contents as a tuf.TargetsMetadata object
 func (s *StateWrapper) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata, error) {
 	e := s.TargetsEnvelope
 	if roleName != TargetsRoleName {
@@ -360,3 +377,30 @@ func (s *StateWrapper) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata,
 
 	return targetsMetadata, nil
 }
+
+//func (s *StateWrapper) getHooksVerifier() (*policy.Verifier, error){
+//	hooksMetadata, err := s.GetHooksMetadata()
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	// todo: how to get root metadata into this workflow? required for verification here.
+//}
+//
+//// todo: use verifier methods
+//func (s *StateWrapper) VerifyHooksMetadata(targetsMetadata tuf.TargetsMetadata) error {
+//	h := s.HooksEnvelope
+//	payloadBytes, err := h.DecodeB64Payload()
+//	if err != nil {
+//		return err
+//	}
+//
+//	sha256Hash := sha256.New()
+//	sha256Hash.Write(payloadBytes)
+//	sha256HashSum := sha256Hash.Sum(nil)
+//
+//	hash := gitinterface.Hash{sha256HashSum[]}
+//
+//	// can use string equality?
+//	return hash.Equal(targetsMetadata.)
+//}
