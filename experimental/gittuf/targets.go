@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/gittuf/gittuf/experimental/gittuf/hooks"
 	"github.com/gittuf/gittuf/internal/gitinterface"
 	"github.com/gittuf/gittuf/internal/rsl"
 	"io"
@@ -419,69 +420,42 @@ func (r *Repository) SignTargets(ctx context.Context, signer sslibdsse.SignerVer
 	return state.Commit(r.r, commitMessage, signCommit)
 }
 
-func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.SignerVerifier) error {
+func (r *Repository) InitializeHooks(ctx context.Context) error {
 	repo := r.GetGitRepository()
-	hooksTip, err := repo.GetReference(HooksRef)
-	if err != nil {
-		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
-			return fmt.Errorf("failed to get policy reference: %s: %w", hooksTip, err)
-		}
-	}
 
-	state, err := LoadFirstState(repo)
-	if err != nil {
-		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
-			return fmt.Errorf("failed to load hooks: %w", err)
-		}
-	}
+	state := &hooks.StateWrapper{Repository: repo}
 
 	slog.Debug("Creating initial rule file...")
-	// todo: we might want to write an InitializeTargetsMetadata for the hooks package.
-	// not a major priority imo, but will streamline reading the code.
-	// however, it'll be the same as policy.InitializeTargetsMetadata() so idk if it
-	// is absolutely necessary.
 	targetsMetadata := policy.InitializeTargetsMetadata()
 
 	env, err := dsse.CreateEnvelope(targetsMetadata)
 	if err != nil {
 		return err
 	}
-	keyID, err := signer.KeyID()
-	slog.Debug(fmt.Sprintf("Signing initial rule file using '%s'...", keyID))
-	env, err = dsse.SignEnvelope(ctx, env, signer)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(state)
 	state.TargetsEnvelope = env
 
 	slog.Debug("Creating initial empty hooks metadata file...")
-	hooksMetadata := InitializeHooksMetadata()
+	hooksMetadata := hooks.InitializeHooksMetadata()
 
 	env, err = dsse.CreateEnvelope(hooksMetadata)
 	if err != nil {
 		return err
 	}
-
 	state.HooksEnvelope = env
 
-	slog.Debug("Committing policy...")
-
-	// Commit with default commit msg, empty hook name and no blob.
-	return state.Commit(repo, DefaultCommitMessage, "", nil, true)
+	return state.Commit(repo, hooks.DefaultCommitMessage, "", nil, true)
 }
 
 func (r *Repository) AddHooks(filePath, stage, hookName string) error {
 	repo := r.GetGitRepository()
-	hooksTip, err := repo.GetReference(HooksRef)
+	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
 		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
 			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
 		}
 	}
 
-	state, err := LoadCurrentState(context.Background(), repo)
+	state, err := hooks.LoadCurrentState(context.Background(), repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -517,7 +491,7 @@ func (r *Repository) AddHooks(filePath, stage, hookName string) error {
 		return err
 	}
 	fmt.Println(blobID)
-	if err := currentHooksMetadata.GenerateHooksMetadataFor(hookName, stage, blobID, sha256HashSum); err != nil {
+	if err := currentHooksMetadata.GenerateMetadataFor(hookName, stage, blobID, sha256HashSum); err != nil {
 		return err
 	}
 
@@ -530,14 +504,14 @@ func (r *Repository) AddHooks(filePath, stage, hookName string) error {
 
 func (r *Repository) ApplyHooks() error {
 	repo := r.GetGitRepository()
-	hooksTip, err := repo.GetReference(HooksRef)
+	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
 		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
 			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
 		}
 	}
 
-	state, err := LoadCurrentState(context.Background(), repo)
+	state, err := hooks.LoadCurrentState(context.Background(), repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -545,7 +519,7 @@ func (r *Repository) ApplyHooks() error {
 	}
 	slog.Debug("Loaded current state")
 
-	targetsMetadata, err := state.GetTargetsMetadata(TargetsRoleName)
+	targetsMetadata, err := state.GetTargetsMetadata(hooks.TargetsRoleName)
 	if err != nil {
 		return err
 	}
@@ -563,21 +537,31 @@ func (r *Repository) ApplyHooks() error {
 	targetsMetadata.SetHooksField(sha256HashSum)
 
 	env, err := dsse.CreateEnvelope(targetsMetadata)
+	if err != nil {
+		return err
+	}
 	state.TargetsEnvelope = env
 
-	return state.Commit(repo, ApplyMessage, "", nil, true)
+	return state.Commit(repo, hooks.ApplyMessage, "", nil, true)
 }
 
-//func (r *Repository) LoadHooks(hookName, stage string) error {
+// VerifyHooks verifies the signature of the metadata env
+// through dsse.VerifyEnvelope
+func (r *Repository) VerifyHooks(ctx context.Context, signer sslibdsse.SignerVerifier) error {
+	// todo: add verification workflow using dsse.VerifyEnvelope
+	return nil
+}
+
+//func (r *Repository) LoadHooks() error {
 //	repo := r.GetGitRepository()
-//	hooksTip, err := repo.GetReference(HooksRef)
+//	hooksTip, err := repo.GetReference(hooks.HooksRef)
 //	if err != nil {
 //		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
 //			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
 //		}
 //	}
 //
-//	state, err := LoadCurrentState(context.Background(), repo)
+//	state, err := hooks.LoadCurrentState(context.Background(), repo)
 //	if err != nil {
 //		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 //			return fmt.Errorf("failed to load hooks: %w", err)
@@ -585,14 +569,10 @@ func (r *Repository) ApplyHooks() error {
 //	}
 //	slog.Debug("Loaded current state")
 //
-//	targetsMetadata, err := state.GetTargetsMetadata(TargetsRoleName)
+//	targetsMetadata, err := state.GetTargetsMetadata(hooks.TargetsRoleName)
 //	if err != nil {
 //		return err
 //	}
 //
-//	hooksMetadata, err := state.GetHooksMetadata()
-//	if err != nil {
-//		return err
-//	}
 //
 //}

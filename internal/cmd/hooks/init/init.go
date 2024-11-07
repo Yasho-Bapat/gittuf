@@ -19,14 +19,11 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	signer, err := gittuf.LoadSigner(repo, o.p.SigningKey)
-	if err != nil {
-		return err
-	}
+
 	// initialize policy
 	// add rule for protecting refs/gittuf/hooks
 
-	return repo.InitializeHooks(cmd.Context(), signer)
+	return repo.InitializeHooks(cmd.Context())
 }
 
 func New(persistent *persistent.Options) *cobra.Command {
