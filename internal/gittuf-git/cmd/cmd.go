@@ -15,6 +15,12 @@ import (
 	"github.com/gittuf/gittuf/internal/tuf"
 )
 
+const (
+	RSLRefspec    = "refs/gittuf/reference-state-log:refs/gittuf/reference-state-log"
+	PolicyRefspec = "refs/gittuf/policy:refs/gittuf/policy"
+	HooksRefspec  = "refs/gittuf/hooks:refs/gittuf/hookss"
+)
+
 // Clone handles the clone operation for gittuf + git
 func Clone(gitArgs args.Args) error {
 	// Set working directory as needed
@@ -98,12 +104,12 @@ func SyncWithRemote(gitArgs args.Args) error {
 	if len(gitArgs.Parameters) > 0 {
 		rslCmdArgs = append(rslCmdArgs, gitArgs.Parameters...)
 	}
-	rslCmdArgs = append(rslCmdArgs, "refs/gittuf/reference-state-log:refs/gittuf/reference-state-log")
+	rslCmdArgs = append(rslCmdArgs, RSLRefspec)
 
 	if len(gitArgs.Parameters) > 0 {
 		policyCmdArgs = append(policyCmdArgs, gitArgs.Parameters...)
 	}
-	policyCmdArgs = append(policyCmdArgs, "refs/gittuf/policy:refs/gittuf/policy")
+	policyCmdArgs = append(policyCmdArgs, PolicyRefspec)
 
 	gitSyncRSLCmd := exec.Command(gitPath, rslCmdArgs...)
 	gitSyncRSLCmd.Stdout = os.Stdout

@@ -31,18 +31,14 @@ const (
 	RootRoleName          = "root"
 	TargetsRoleName       = "targets"
 	metadataTreeEntryName = "metadata"
-	HooksDir              = ".gittuf/hooks"
 	hooksTreeEntryName    = "hooks"
 	HooksRoleName         = "hooks"
 	ApplyMessage          = "Apply hooks"
 )
 
 var (
-	ErrMetadataNotFound           = errors.New("unable to find requested metadata file; has it been initialized?")
-	ErrDanglingDelegationMetadata = errors.New("unreachable targets metadata found")
-	ErrPolicyNotFound             = errors.New("cannot find policy")
-	ErrUnableToMatchRootKeys      = errors.New("unable to match root public keys, gittuf policy is in a broken state")
-	ErrNotAncestor                = errors.New("cannot apply changes since policy is not an ancestor of the policy staging")
+	ErrMetadataNotFound = errors.New("unable to find requested metadata file; has it been initialized?")
+	ErrPolicyNotFound   = errors.New("cannot find policy")
 )
 
 // Hooks metadata should be encoded on existing policy metadata

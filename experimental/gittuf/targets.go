@@ -552,27 +552,41 @@ func (r *Repository) VerifyHooks(ctx context.Context, signer sslibdsse.SignerVer
 	return nil
 }
 
-//func (r *Repository) LoadHooks() error {
-//	repo := r.GetGitRepository()
-//	hooksTip, err := repo.GetReference(hooks.HooksRef)
-//	if err != nil {
-//		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
-//			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
-//		}
-//	}
-//
-//	state, err := hooks.LoadCurrentState(context.Background(), repo)
-//	if err != nil {
-//		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
-//			return fmt.Errorf("failed to load hooks: %w", err)
-//		}
-//	}
-//	slog.Debug("Loaded current state")
-//
-//	targetsMetadata, err := state.GetTargetsMetadata(hooks.TargetsRoleName)
-//	if err != nil {
-//		return err
-//	}
-//
-//
-//}
+// LoadHooks should load the latest hooks metadata and load the hook files
+func (r *Repository) LoadHooks() error {
+	repo := r.GetGitRepository()
+	hooksTip, err := repo.GetReference(hooks.HooksRef)
+	if err != nil {
+		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
+			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
+		}
+	}
+
+	state, err := hooks.LoadCurrentState(context.Background(), repo)
+	if err != nil {
+		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
+			return fmt.Errorf("failed to load hooks: %w", err)
+		}
+	}
+	slog.Debug("Loaded current state")
+
+	hooksMetadata, err := state.GetHooksMetadata()
+	if err != nil {
+		return err
+	}
+
+	for filename, hookInfo := range hooksMetadata.HooksInfo {
+		hookContents, err := repo.ReadBlobFromString(hookInfo.BlobID)
+		if err != nil {
+			return err
+		}
+
+		err = os.WriteFile(filename, hookContents, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	slog.Debug("Loaded hooks files")
+	return nil
+}
