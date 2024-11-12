@@ -422,6 +422,10 @@ func (r *Repository) SignTargets(ctx context.Context, signer sslibdsse.SignerVer
 
 func (r *Repository) InitializeHooks(ctx context.Context) error {
 	repo := r.GetGitRepository()
+	stateChecker, err := hooks.LoadCurrentState(context.Background(), repo)
+	if stateChecker != nil {
+		return fmt.Errorf("Hooks ref already initialized, cannot initialize again.")
+	}
 
 	state := &hooks.StateWrapper{Repository: repo}
 
@@ -547,12 +551,40 @@ func (r *Repository) ApplyHooks() error {
 
 // VerifyHooks verifies the signature of the metadata env
 // through dsse.VerifyEnvelope
-func (r *Repository) VerifyHooks(ctx context.Context, signer sslibdsse.SignerVerifier) error {
-	// todo: add verification workflow using dsse.VerifyEnvelope
+func (r *Repository) VerifyHooks(state *hooks.StateWrapper) error {
+	h := state.HooksEnvelope
+	payloadBytes, err := h.DecodeB64Payload()
+	if err != nil {
+		return err
+	}
+
+	sha256Hash := sha256.New()
+	sha256Hash.Write(payloadBytes)
+	sha256HashSum := sha256Hash.Sum(nil)
+
+	targetsMetadata, err := state.GetTargetsMetadata(hooks.TargetsRoleName)
+	if err != nil {
+		return err
+	}
+
+	// verify that both hashes are the same.
+	// to check hooksHash is going to be a string because the metadata is JSON encoded
+	// 	=> sha256HashSumGit needs to be converted to a string => needs to be of the type
+	// 	gitinterface.Hash
+	sha256HashSumGit := gitinterface.Hash(sha256HashSum)
+	hooksHash := targetsMetadata.GetHooksField()
+	if hooksHash != sha256HashSumGit.String() {
+		return hooks.ErrHooksMetadataHashMismatch
+	}
+
 	return nil
 }
 
 // LoadHooks should load the latest hooks metadata and load the hook files
+// todo: change workflow to work with Lua and gVisor - return the bytestream
+//
+//		instead of writing the file. The logic for deciding whether to write
+//	 the file or not should be in gittuf-git/cmd
 func (r *Repository) LoadHooks() error {
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
@@ -570,6 +602,11 @@ func (r *Repository) LoadHooks() error {
 	}
 	slog.Debug("Loaded current state")
 
+	err = r.VerifyHooks(state)
+	if err != nil {
+		return err
+	}
+
 	hooksMetadata, err := state.GetHooksMetadata()
 	if err != nil {
 		return err
@@ -577,6 +614,11 @@ func (r *Repository) LoadHooks() error {
 
 	for filename, hookInfo := range hooksMetadata.HooksInfo {
 		hookContents, err := repo.ReadBlobFromString(hookInfo.BlobID)
+		if err != nil {
+			return err
+		}
+		filename = "hooks/" + filename
+		err = os.MkdirAll(filepath.Dir(filename), 0755)
 		if err != nil {
 			return err
 		}
@@ -588,5 +630,55 @@ func (r *Repository) LoadHooks() error {
 	}
 
 	slog.Debug("Loaded hooks files")
+	return nil
+}
+
+// LoadHookByStage takes in the stage as a string arg, and builds ONLY the file associated with that stage.
+// todo: might have to change workflow to return bytes instead of writing the file
+func (r *Repository) LoadHookByStage(stage string) error {
+	repo := r.GetGitRepository()
+	hooksTip, err := repo.GetReference(hooks.HooksRef)
+	if err != nil {
+		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
+			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
+		}
+	}
+
+	state, err := hooks.LoadCurrentState(context.Background(), repo)
+	if err != nil {
+		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
+			return fmt.Errorf("failed to load hooks: %w", err)
+		}
+	}
+	slog.Debug("Loaded current state")
+
+	err = r.VerifyHooks(state)
+	if err != nil {
+		return err
+	}
+
+	hooksMetadata, err := state.GetHooksMetadata()
+	if err != nil {
+		return err
+	}
+
+	hookName := hooksMetadata.Bindings[stage]
+	hookInfo := hooksMetadata.HooksInfo[hookName]
+	hookContents, err := repo.ReadBlobFromString(hookInfo.BlobID)
+	if err != nil {
+		return err
+	}
+	filename := "hooks/" + hookName
+	err = os.MkdirAll(filepath.Dir(filename), 0755)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(filename, hookContents, 0644)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Loaded hook file for ", stage)
 	return nil
 }

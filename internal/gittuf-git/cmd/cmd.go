@@ -82,6 +82,9 @@ func SyncWithRemote(gitArgs args.Args) error {
 
 	rslCmdArgs := []string{}
 	policyCmdArgs := []string{}
+
+	// when adding support for hooks and doing git fetch HooksRef, it is important to
+	// fetch the rsl also. it already being done here, but this is as a reminder.
 	if gitArgs.Command == "pull" || gitArgs.Command == "fetch" {
 		// use git fetch to get the updates to the RSL.
 		rslCmdArgs = append(rslCmdArgs, "fetch")
@@ -145,6 +148,11 @@ func Commit(gitArgs args.Args) error {
 		fmt.Println("Verification unsuccessful with error: ", err)
 	} else {
 		fmt.Println("Verification success")
+	}
+
+	err = repo.LoadHookByStage("pre-commit")
+	if err != nil {
+		return err
 	}
 
 	// Commit irrespective of failed verification. However, verification is

@@ -37,8 +37,9 @@ const (
 )
 
 var (
-	ErrMetadataNotFound = errors.New("unable to find requested metadata file; has it been initialized?")
-	ErrPolicyNotFound   = errors.New("cannot find policy")
+	ErrMetadataNotFound          = errors.New("unable to find requested metadata file; has it been initialized?")
+	ErrPolicyNotFound            = errors.New("cannot find policy")
+	ErrHooksMetadataHashMismatch = errors.New("Error verifying Hooks metadata - hashes do not match.")
 )
 
 // Hooks metadata should be encoded on existing policy metadata
@@ -62,7 +63,7 @@ type StateWrapper struct {
 
 type HooksMetadata struct {
 	HooksInfo map[string]*HooksInformation `json:"HooksInfo"`
-	Bindings  map[string][]string          `json:"Bindings"`
+	Bindings  map[string]string            `json:"Bindings"`
 }
 
 type HooksInformation struct {
@@ -234,7 +235,7 @@ func LoadFirstState(ctx context.Context, repo *gitinterface.Repository) (*StateW
 }
 
 func InitializeHooksMetadata() HooksMetadata {
-	return HooksMetadata{HooksInfo: make(map[string]*HooksInformation)}
+	return HooksMetadata{HooksInfo: make(map[string]*HooksInformation), Bindings: make(map[string]string)}
 }
 
 func (s *StateWrapper) GetHooksMetadata() (*HooksMetadata, error) {
@@ -334,7 +335,7 @@ func (h *HooksMetadata) GenerateMetadataFor(hookName, stage string, blobID, sha2
 		BlobID:     blobID.String(),
 	}
 	h.HooksInfo[hookName] = &hookInfo
-
+	h.Bindings[stage] = hookName
 	return nil
 }
 
@@ -363,4 +364,8 @@ func (s *StateWrapper) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata,
 	}
 
 	return targetsMetadata, nil
+}
+
+func (s *StateWrapper) HasBeenInitialized() bool {
+	return s.HooksEnvelope != nil
 }

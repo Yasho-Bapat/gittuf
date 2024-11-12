@@ -124,6 +124,8 @@ type TargetsMetadata interface {
 	SetExpires(expiry string)
 
 	SetHooksField(hooksID gitinterface.Hash)
+
+	GetHooksField() any
 	// SchemaVersion returns the metadata schema version.
 	SchemaVersion() string
 

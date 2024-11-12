@@ -40,6 +40,10 @@ func (t *TargetsMetadata) SetHooksField(hooksID gitinterface.Hash) {
 	}
 }
 
+func (t *TargetsMetadata) GetHooksField() any {
+	return t.Targets["hooks"]
+}
+
 // SetExpires sets the expiry date of the TargetsMetadata to the value passed
 // in.
 func (t *TargetsMetadata) SetExpires(expires string) {
