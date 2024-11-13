@@ -14,7 +14,7 @@ type options struct {
 	threshold      int
 }
 
-func (o *options) Run(cmd *cobra.Command, _ []string) error {
+func (o *options) Run(_ *cobra.Command, _ []string) error {
 	repo, err := gittuf.LoadRepository()
 	if err != nil {
 		return err
@@ -23,7 +23,7 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 	// initialize policy
 	// add rule for protecting refs/gittuf/hooks
 
-	return repo.InitializeHooks(cmd.Context())
+	return repo.InitializeHooks()
 }
 
 func New(persistent *persistent.Options) *cobra.Command {
