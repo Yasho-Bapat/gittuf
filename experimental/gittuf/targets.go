@@ -477,11 +477,11 @@ func (r *Repository) SignTargets(ctx context.Context, signer sslibdsse.SignerVer
 	return state.Commit(r.r, commitMessage, signCommit)
 }
 
-func (r *Repository) InitializeHooks(ctx context.Context) error {
+func (r *Repository) InitializeHooks() error {
 	repo := r.GetGitRepository()
-	stateChecker, err := hooks.LoadCurrentState(context.Background(), repo)
+	stateChecker, err := hooks.LoadCurrentState(repo)
 	if stateChecker != nil {
-		return fmt.Errorf("Hooks ref already initialized, cannot initialize again.")
+		return fmt.Errorf("hooks ref already initialized, cannot initialize again")
 	}
 
 	state := &hooks.StateWrapper{Repository: repo}
@@ -507,7 +507,7 @@ func (r *Repository) InitializeHooks(ctx context.Context) error {
 	return state.Commit(repo, hooks.DefaultCommitMessage, "", nil, true)
 }
 
-func (r *Repository) AddHooks(filePath, stage, hookName string) error {
+func (r *Repository) AddHooks(filePath, stage, hookName, execenv string, modules []string) error {
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
@@ -516,7 +516,7 @@ func (r *Repository) AddHooks(filePath, stage, hookName string) error {
 		}
 	}
 
-	state, err := hooks.LoadCurrentState(context.Background(), repo)
+	state, err := hooks.LoadCurrentState(repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -532,7 +532,7 @@ func (r *Repository) AddHooks(filePath, stage, hookName string) error {
 	if err != nil {
 		return err
 	}
-	defer hookFile.Close()
+	defer hookFile.Close() // nolint:errcheck
 
 	hookFileContents, err := io.ReadAll(hookFile)
 	if err != nil {
@@ -552,7 +552,7 @@ func (r *Repository) AddHooks(filePath, stage, hookName string) error {
 		return err
 	}
 	fmt.Println(blobID)
-	if err := currentHooksMetadata.GenerateMetadataFor(hookName, stage, blobID, sha256HashSum); err != nil {
+	if err := currentHooksMetadata.GenerateMetadataFor(hookName, stage, execenv, blobID, sha256HashSum, modules); err != nil {
 		return err
 	}
 
@@ -572,7 +572,7 @@ func (r *Repository) ApplyHooks() error {
 		}
 	}
 
-	state, err := hooks.LoadCurrentState(context.Background(), repo)
+	state, err := hooks.LoadCurrentState(repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -651,7 +651,7 @@ func (r *Repository) LoadHooks() error {
 		}
 	}
 
-	state, err := hooks.LoadCurrentState(context.Background(), repo)
+	state, err := hooks.LoadCurrentState(repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -680,7 +680,7 @@ func (r *Repository) LoadHooks() error {
 			return err
 		}
 
-		err = os.WriteFile(filename, hookContents, 0644)
+		err = os.WriteFile(filename, hookContents, 0600)
 		if err != nil {
 			return err
 		}
@@ -701,7 +701,7 @@ func (r *Repository) LoadHookByStage(stage string) error {
 		}
 	}
 
-	state, err := hooks.LoadCurrentState(context.Background(), repo)
+	state, err := hooks.LoadCurrentState(repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -731,7 +731,7 @@ func (r *Repository) LoadHookByStage(stage string) error {
 		return err
 	}
 
-	err = os.WriteFile(filename, hookContents, 0644)
+	err = os.WriteFile(filename, hookContents, 0600)
 	if err != nil {
 		return err
 	}
