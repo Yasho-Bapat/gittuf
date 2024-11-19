@@ -23,8 +23,8 @@ func New() *cobra.Command {
 
 	cmd.AddCommand(i.New(o))
 	cmd.AddCommand(add.New())
-	cmd.AddCommand(apply.New())
-	cmd.AddCommand(load.New())
+	cmd.AddCommand(apply.New(o))
+	cmd.AddCommand(load.New(o))
 
 	return cmd
 }

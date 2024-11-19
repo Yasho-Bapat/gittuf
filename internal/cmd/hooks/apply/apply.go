@@ -5,7 +5,8 @@ package apply
 
 import (
 	"github.com/gittuf/gittuf/experimental/gittuf"
-	"github.com/gittuf/gittuf/internal/cmd/trust/persistent"
+	"github.com/gittuf/gittuf/internal/cmd/common"
+	"github.com/gittuf/gittuf/internal/cmd/policy/persistent"
 	"github.com/spf13/cobra"
 )
 
@@ -19,15 +20,21 @@ func (o *options) Run(cmd *cobra.Command, _ []string) (err error) {
 		return err
 	}
 
-	return repo.ApplyHooks()
+	signer, err := gittuf.LoadSigner(repo, o.p.SigningKey)
+	if err != nil {
+		return err
+	}
+
+	return repo.ApplyHooks(cmd.Context(), signer)
 }
 
-func New() *cobra.Command {
-	o := &options{}
+func New(persistent *persistent.Options) *cobra.Command {
+	o := &options{p: persistent}
 	cmd := &cobra.Command{
 		Use:               "apply",
 		Short:             "secure hooks metadata file by embedding and committing with Targets",
 		RunE:              o.Run,
+		PreRunE:           common.CheckIfSigningViableWithFlag,
 		DisableAutoGenTag: true,
 	}
 
