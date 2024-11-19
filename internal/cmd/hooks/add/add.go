@@ -33,6 +33,7 @@ type options struct {
 	hookname string
 	env      string
 	modules  []string
+	keyIDs   []string
 }
 
 func (o *options) AddFlags(cmd *cobra.Command) {
@@ -78,6 +79,13 @@ func (o *options) AddFlags(cmd *cobra.Command) {
 		nil,
 		"Modules which the Lua hook must run. Usage: -m module1,module2,modulen",
 	)
+	cmd.Flags().StringSliceVarP(
+		&o.keyIDs,
+		"keyIDs",
+		"i",
+		nil,
+		"Key IDs which must run this hook. Usage: -i k1,k2,k3...",
+	)
 
 }
 
@@ -91,6 +99,11 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	//signer, err := gittuf.LoadSigner(repo, o.p.SigningKey)
+	//if err != nil {
+	//	return err
+	//}
+
 	// a hooks.HookIdentifiers object is being used to pass in the value for repo.AddHooks because it's too many
 	// arguments to be passed into the function otherwise.
 	identifiers := hooks.HookIdentifiers{
@@ -99,9 +112,11 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 		Hookname:    o.hookname,
 		Environment: o.env,
 		Modules:     o.modules,
+		KeyIDs:      o.keyIDs,
 	}
 
-	return repo.AddHooks(cmd.Context(), identifiers)
+	//return repo.AddHooks(cmd.Context(), identifiers, signer)
+	return repo.AddHooks(identifiers)
 }
 
 func New() *cobra.Command {

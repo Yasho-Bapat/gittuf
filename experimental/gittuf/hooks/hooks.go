@@ -40,6 +40,7 @@ var (
 	ErrMetadataNotFound          = errors.New("unable to find requested metadata file")
 	ErrPolicyNotFound            = errors.New("cannot find policy")
 	ErrHooksMetadataHashMismatch = errors.New("error verifying Hooks metadata - hashes do not match")
+	ErrHookAccessDenied          = errors.New("attempting to load hook with unauthorized key")
 )
 
 type HookState struct {
@@ -52,8 +53,9 @@ type HookState struct {
 }
 
 type Metadata struct {
-	HooksInfo map[string]*Hook  `json:"HooksInfo"`
-	Bindings  map[string]string `json:"Bindings"`
+	HooksInfo map[string]*Hook    `json:"HooksInfo"`
+	Bindings  map[string]string   `json:"Bindings"`
+	Access    map[string][]string `json:"Access"`
 }
 
 type HookIdentifiers struct {
@@ -62,6 +64,7 @@ type HookIdentifiers struct {
 	Hookname    string
 	Environment string
 	Modules     []string
+	KeyIDs      []string
 }
 
 type Hook struct {
@@ -71,6 +74,7 @@ type Hook struct {
 	Branches    []string `json:"Branches"`
 	Environment string   `json:"Environment"`
 	Modules     []string `json:"Modules"`
+	KeyIDs      []string `json:"KeyIDs"`
 }
 
 type regularSearcher struct {
@@ -131,7 +135,7 @@ func LoadCurrentState(repo *gitinterface.Repository) (*HookState, error) {
 
 // InitializeHooksMetadata initializes an empty hooks Metadata object
 func InitializeHooksMetadata() Metadata {
-	return Metadata{HooksInfo: make(map[string]*Hook), Bindings: make(map[string]string)}
+	return Metadata{HooksInfo: make(map[string]*Hook), Bindings: make(map[string]string), Access: make(map[string][]string)}
 }
 
 // GetHooksMetadata returns the hooks Metadata associated with the current HookState
@@ -157,7 +161,7 @@ func (s *HookState) GetHooksMetadata() (*Metadata, error) {
 }
 
 // GenerateMetadataFor writes Metadata about the provided file and returns an error, if any
-func (h *Metadata) GenerateMetadataFor(hookName, stage, env string, blobID, sha256HashSum gitinterface.Hash, modules []string) error {
+func (h *Metadata) GenerateMetadataFor(hookName, stage, env string, blobID, sha256HashSum gitinterface.Hash, modules, keyIDs []string) error {
 	hookInfo := Hook{
 		SHA256Hash:  sha256HashSum.String(),
 		Stage:       stage,
@@ -167,6 +171,7 @@ func (h *Metadata) GenerateMetadataFor(hookName, stage, env string, blobID, sha2
 	}
 	h.HooksInfo[hookName] = &hookInfo
 	h.Bindings[stage] = hookName
+	h.Access[stage] = keyIDs // make this hookName later maybe
 	return nil
 }
 

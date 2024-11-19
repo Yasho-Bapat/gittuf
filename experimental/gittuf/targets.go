@@ -420,19 +420,35 @@ func (r *Repository) SignTargets(ctx context.Context, signer sslibdsse.SignerVer
 	return state.Commit(r.r, commitMessage, signCommit)
 }
 
-func (r *Repository) InitializeHooks() error {
+func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.Signer) error {
+	// get current context
 	repo := r.GetGitRepository()
 	stateChecker, err := hooks.LoadCurrentState(repo)
 	if stateChecker != nil {
 		return fmt.Errorf("hooks ref already initialized, cannot initialize again")
 	}
 
+	// create and start populating state
 	state := &hooks.HookState{Repository: repo}
 
 	slog.Debug("Creating initial rule file...")
 	targetsMetadata := policy.InitializeTargetsMetadata()
 
+	keyID, err := signer.KeyID()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("KeyID: ", keyID) // temporary , remove later
+
+	// create DSSE envelope for targets metadata
 	env, err := dsse.CreateEnvelope(targetsMetadata)
+	if err != nil {
+		return err
+	}
+
+	slog.Debug(fmt.Sprintf("Signing targets file using '%s'...", keyID))
+	env, err = dsse.SignEnvelope(ctx, env, signer)
 	if err != nil {
 		return err
 	}
@@ -445,17 +461,25 @@ func (r *Repository) InitializeHooks() error {
 	if err != nil {
 		return err
 	}
+
+	slog.Debug(fmt.Sprintf("Signing hooks file using '%s'...", keyID))
+	env, err = dsse.SignEnvelope(ctx, env, signer)
+	if err != nil {
+		return err
+	}
 	state.HooksEnvelope = env
 
 	return state.Commit(repo, hooks.DefaultCommitMessage, "", nil, true)
 }
 
-func (r *Repository) AddHooks(ctx context.Context, o hooks.HookIdentifiers) error {
+func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
+	// assigning all fields from o
 	filePath := o.Filepath
 	stage := o.Stage
 	hookName := o.Hookname
 	execenv := o.Environment
 	modules := o.Modules
+	keyIDs := o.KeyIDs
 
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
@@ -500,8 +524,9 @@ func (r *Repository) AddHooks(ctx context.Context, o hooks.HookIdentifiers) erro
 	if err != nil {
 		return err
 	}
-	fmt.Println(blobID)
-	if err := currentHooksMetadata.GenerateMetadataFor(hookName, stage, execenv, blobID, sha256HashSum, modules); err != nil {
+
+	// the following line should probably be changed to just passing in the o object later.
+	if err := currentHooksMetadata.GenerateMetadataFor(hookName, stage, execenv, blobID, sha256HashSum, modules, keyIDs); err != nil {
 		return err
 	}
 
@@ -510,13 +535,14 @@ func (r *Repository) AddHooks(ctx context.Context, o hooks.HookIdentifiers) erro
 		return err
 	}
 
+	// assign HooksEnvelope field with env value
 	state.HooksEnvelope = env
 
 	commitMessage := "Add " + hookName
 	return state.Commit(repo, commitMessage, hookName, blobID, true)
 }
 
-func (r *Repository) ApplyHooks() error {
+func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) error {
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
@@ -554,8 +580,14 @@ func (r *Repository) ApplyHooks() error {
 	if err != nil {
 		return err
 	}
-	state.TargetsEnvelope = env
 
+	// sign new targets data
+	env, err = dsse.SignEnvelope(ctx, env, signer)
+	if err != nil {
+		return err
+	}
+
+	state.TargetsEnvelope = env
 	return state.Commit(repo, hooks.ApplyMessage, "", nil, true)
 }
 
@@ -586,12 +618,31 @@ func (r *Repository) VerifyHooks(state *hooks.HookState) error {
 	return nil
 }
 
+func (r *Repository) VerifyHookAccess(state *hooks.HookState, signer sslibdsse.Signer, stage string) error {
+	hooksMetadata, err := state.GetHooksMetadata()
+	if err != nil {
+		return err
+	}
+
+	keyID, err := signer.KeyID()
+	if err != nil {
+		return err
+	}
+
+	allowedKeys := hooksMetadata.Access[stage]
+	for _, key := range allowedKeys {
+		if keyID == key {
+			return nil
+		}
+	}
+	return hooks.ErrHookAccessDenied
+}
+
 // LoadHooks should load the latest hooks metadata and load the hook files
 // todo:change workflow to work with Lua and gVisor - return the bytestream
-//
-//	instead of writing the file. The logic for deciding whether to write
-//	the file or not should be in gittuf-git/cmd
-func (r *Repository) LoadHooks() error {
+// instead of writing the file. The logic for deciding whether to write
+// the file or not should be in gittuf-git/cmd
+func (r *Repository) LoadHooks(signer sslibdsse.Signer) error {
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
@@ -612,6 +663,7 @@ func (r *Repository) LoadHooks() error {
 	if err != nil {
 		return err
 	}
+	slog.Debug("Verification successful.")
 
 	hooksMetadata, err := state.GetHooksMetadata()
 	if err != nil {
@@ -619,6 +671,12 @@ func (r *Repository) LoadHooks() error {
 	}
 
 	for filename, hookInfo := range hooksMetadata.HooksInfo {
+		stage := hookInfo.Stage
+		err := r.VerifyHookAccess(state, signer, stage)
+		if err != nil {
+			fmt.Println("Attempting to load ", stage, " hook with unauthorized key -- skipping...")
+			continue
+		}
 		hookBlobID, err := gitinterface.NewHash(hookInfo.BlobID)
 		hookContents, err := repo.ReadBlob(hookBlobID)
 		if err != nil {

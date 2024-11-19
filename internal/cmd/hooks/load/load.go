@@ -5,7 +5,8 @@ package load
 
 import (
 	"github.com/gittuf/gittuf/experimental/gittuf"
-	"github.com/gittuf/gittuf/internal/cmd/trust/persistent"
+	"github.com/gittuf/gittuf/internal/cmd/common"
+	"github.com/gittuf/gittuf/internal/cmd/policy/persistent"
 	"github.com/spf13/cobra"
 )
 
@@ -19,15 +20,20 @@ func (o *options) Run(cmd *cobra.Command, _ []string) (err error) {
 		return err
 	}
 
-	return repo.LoadHooks()
+	signer, err := gittuf.LoadSigner(repo, o.p.SigningKey)
+	if err != nil {
+		return err
+	}
+	return repo.LoadHooks(signer)
 }
 
-func New() *cobra.Command {
-	o := &options{}
+func New(persistent *persistent.Options) *cobra.Command {
+	o := &options{p: persistent}
 	cmd := &cobra.Command{
 		Use:               "load",
 		Short:             "load hooks files from metadata",
 		RunE:              o.Run,
+		PreRunE:           common.CheckIfSigningViableWithFlag,
 		DisableAutoGenTag: true,
 	}
 
