@@ -32,6 +32,7 @@ const (
 	DefaultCommitMessage = "Create hooks ref"
 
 	ApplyMessage          = "Apply hooks"
+	SigningKey            = "user.signingkey"
 	metadataTreeEntryName = "metadata"
 	hooksTreeEntryName    = "hooks"
 )
