@@ -24,7 +24,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(i.New(o))
 	cmd.AddCommand(add.New())
 	cmd.AddCommand(apply.New(o))
-	cmd.AddCommand(load.New(o))
+	cmd.AddCommand(load.New())
 
 	return cmd
 }
