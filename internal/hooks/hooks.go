@@ -59,15 +59,6 @@ type Metadata struct {
 	Access    map[string][]string `json:"Access"`
 }
 
-type HookIdentifiers struct {
-	Filepath    string
-	Stage       string
-	Hookname    string
-	Environment string
-	Modules     []string
-	KeyIDs      []string
-}
-
 type Hook struct {
 	SHA256Hash  string   `json:"SHA256Hash"`
 	BlobID      string   `json:"BlobID"`
@@ -76,6 +67,15 @@ type Hook struct {
 	Environment string   `json:"Environment"`
 	Modules     []string `json:"Modules"`
 	KeyIDs      []string `json:"KeyIDs"`
+}
+
+type HookIdentifiers struct {
+	Filepath    string
+	Stage       string
+	Hookname    string
+	Environment string
+	Modules     []string
+	KeyIDs      []string
 }
 
 type regularSearcher struct {
@@ -130,7 +130,6 @@ func LoadCurrentState(repo *gitinterface.Repository) (*HookState, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(entry)
 	return loadState(repo, entry)
 }
 
