@@ -5,8 +5,8 @@ package load
 
 import (
 	"github.com/gittuf/gittuf/experimental/gittuf"
-	"github.com/gittuf/gittuf/experimental/gittuf/hooks"
 	"github.com/gittuf/gittuf/internal/cmd/policy/persistent"
+	"github.com/gittuf/gittuf/internal/hooks"
 	"github.com/spf13/cobra"
 )
 
