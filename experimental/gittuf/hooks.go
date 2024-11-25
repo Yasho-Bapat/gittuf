@@ -5,7 +5,11 @@ import (
 )
 
 // FetchHooksMetadata returns the Hook metadata for the state passed in
-func (r *Repository) FetchHooksMetadata(state *hooks.HookState) (*hooks.Metadata, error) {
+func (r *Repository) FetchHooksMetadata() (*hooks.Metadata, error) {
+	state, err := hooks.LoadCurrentState(r.GetGitRepository())
+	if err != nil {
+		return nil, err
+	}
 	return state.GetHooksMetadata()
 }
 

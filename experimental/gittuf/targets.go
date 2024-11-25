@@ -526,7 +526,7 @@ func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.Signe
 	}
 	state.HooksEnvelope = env
 
-	return state.Commit(repo, hooks.DefaultCommitMessage, "", nil, true)
+	return state.Commit(repo, hooks.DefaultCommitMessage, nil, true)
 }
 
 func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
@@ -538,6 +538,7 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 	modules := o.Modules
 	keyIDs := o.KeyIDs
 
+	// load repository for the current session
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
@@ -546,6 +547,7 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 		}
 	}
 
+	// load current state for the repository
 	state, err := hooks.LoadCurrentState(repo)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
@@ -583,7 +585,7 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 	}
 
 	// the following line should probably be changed to just passing in the o object later.
-	if err := currentHooksMetadata.GenerateMetadataFor(hookName, stage, execenv, blobID, sha256HashSum, modules, keyIDs); err != nil {
+	if err := currentHooksMetadata.GenerateHooksMetadataFor(hookName, stage, execenv, blobID, sha256HashSum, modules, keyIDs); err != nil {
 		return err
 	}
 
@@ -595,11 +597,14 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 	// assign HooksEnvelope field with env value
 	state.HooksEnvelope = env
 
+	hookCommitMap := map[string]gitinterface.Hash{hookName: blobID}
+
 	commitMessage := "Add " + hookName
-	return state.Commit(repo, commitMessage, hookName, blobID, true)
+	return state.Commit(repo, commitMessage, hookCommitMap, true)
 }
 
 func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) error {
+	// load git repository for current session
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
@@ -608,7 +613,10 @@ func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) er
 		}
 	}
 
+	// load latest state for the current repository
 	state, err := hooks.LoadCurrentState(repo)
+
+	// get blobIDs from rsl.GetLatestReferenceEntry
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -616,6 +624,40 @@ func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) er
 	}
 	slog.Debug("Loaded current state")
 
+	hooksMetadata, err := state.GetHooksMetadata()
+	if err != nil {
+		return err
+	}
+
+	// populating the final tree with all hooks to be committed as part of the latest update
+	// => getting the file contents from the blob ID, writing the file and updating
+	// hooks metadata with the new blob ID.
+	hooksApplyMap := make(map[string]gitinterface.Hash)
+	for filename, hookInfo := range hooksMetadata.HooksInfo {
+		blobID, err := gitinterface.NewHash(hookInfo.BlobID)
+		if err != nil {
+			return err
+		}
+
+		hookFileContents, err := repo.ReadBlob(blobID)
+		if err != nil {
+			return err
+		}
+
+		newBlobID, err := repo.WriteBlob(hookFileContents)
+		if err != nil {
+			return err
+		}
+
+		hooksApplyMap[filename] = newBlobID
+		hookInfo.BlobID = newBlobID.String()
+		err = hooksMetadata.UpdateHooksMetadata(filename, hookInfo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// load targets metadata
 	targetsMetadata, err := state.GetTargetsMetadata(hooks.TargetsRoleName)
 	if err != nil {
 		return err
@@ -645,7 +687,7 @@ func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) er
 	}
 
 	state.TargetsEnvelope = env
-	return state.Commit(repo, hooks.ApplyMessage, "", nil, true)
+	return state.Commit(repo, hooks.ApplyMessage, hooksApplyMap, true)
 }
 
 // VerifyHooks verifies the signature of the metadata env
@@ -687,6 +729,10 @@ func (r *Repository) VerifyHookAccess(state *hooks.HookState, signer sslibdsse.S
 	}
 
 	allowedKeys := hooksMetadata.Access[stage]
+	if allowedKeys == nil {
+		return nil
+	}
+
 	for _, key := range allowedKeys {
 		if keyID == key {
 			return nil
@@ -734,6 +780,7 @@ func (r *Repository) LoadHooks(signer sslibdsse.Signer) error {
 			fmt.Println("Attempting to load ", stage, " hook with unauthorized key -- skipping...")
 			continue
 		}
+		// convert string hash value to hash object for reading blob contents
 		hookBlobID, err := gitinterface.NewHash(hookInfo.BlobID)
 		hookContents, err := repo.ReadBlob(hookBlobID)
 		if err != nil {
@@ -786,7 +833,9 @@ func (r *Repository) LoadHookByStage(stage string) error {
 
 	hookName := hooksMetadata.Bindings[stage]
 	hookInfo := hooksMetadata.HooksInfo[hookName]
-	hookContents, err := repo.ReadBlobFromString(hookInfo.BlobID)
+	// convert string hash value to hash object for reading blob contents
+	hookBlobID, err := gitinterface.NewHash(hookInfo.BlobID)
+	hookContents, err := repo.ReadBlob(hookBlobID)
 	if err != nil {
 		return err
 	}

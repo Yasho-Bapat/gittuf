@@ -160,8 +160,8 @@ func (s *HookState) GetHooksMetadata() (*Metadata, error) {
 	return hooksMetadata, nil
 }
 
-// GenerateMetadataFor writes Metadata about the provided file and returns an error, if any
-func (h *Metadata) GenerateMetadataFor(hookName, stage, env string, blobID, sha256HashSum gitinterface.Hash, modules, keyIDs []string) error {
+// GenerateHooksMetadataFor writes Metadata about the provided file and returns an error, if any
+func (h *Metadata) GenerateHooksMetadataFor(hookName, stage, env string, blobID, sha256HashSum gitinterface.Hash, modules, keyIDs []string) error {
 	hookInfo := Hook{
 		SHA256Hash:  sha256HashSum.String(),
 		Stage:       stage,
@@ -172,6 +172,13 @@ func (h *Metadata) GenerateMetadataFor(hookName, stage, env string, blobID, sha2
 	h.HooksInfo[hookName] = &hookInfo
 	h.Bindings[stage] = hookName
 	h.Access[stage] = keyIDs // make this hookName later maybe
+	return nil
+}
+
+// UpdateHooksMetadata takes a hook name and a Hook object and replaces the old metadata with
+// this new metadata provided by the Hook object.
+func (h *Metadata) UpdateHooksMetadata(hookName string, updatedHookIdentifiers *Hook) error {
+	h.HooksInfo[hookName] = updatedHookIdentifiers
 	return nil
 }
 
@@ -204,7 +211,7 @@ func (s *HookState) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata, er
 }
 
 // Commit writes hooks and targets metadata and file (if provided) and returns an error if any
-func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage, hookName string, addBlob gitinterface.Hash, sign bool) error {
+func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage string, blobsMapping map[string]gitinterface.Hash, sign bool) error {
 	if len(commitMessage) == 0 {
 		commitMessage = DefaultCommitMessage
 	}
@@ -232,8 +239,11 @@ func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage, hookNam
 		allTreeEntries[path.Join(metadataTreeEntryName, name+".json")] = blobID
 	}
 
-	if len(addBlob) > 0 {
-		allTreeEntries[path.Join(hooksTreeEntryName, hookName)] = addBlob
+	// structure of blobsMapping is {hookname: blobID}
+	if len(blobsMapping) > 0 {
+		for hookName, blobID := range blobsMapping {
+			allTreeEntries[path.Join(hooksTreeEntryName, hookName)] = blobID
+		}
 	}
 
 	slog.Debug("building and populating new tree...")
@@ -338,7 +348,7 @@ func loadState(repo *gitinterface.Repository, requestedEntry *rsl.ReferenceEntry
 		}
 		return nil, err
 	}
-	knows, err := repo.KnowsCommit(requestedEntry.ID, firstHooksEntry.ID) // this is the problem
+	knows, err := repo.KnowsCommit(requestedEntry.ID, firstHooksEntry.ID)
 	if err != nil {
 		return nil, err
 	}
