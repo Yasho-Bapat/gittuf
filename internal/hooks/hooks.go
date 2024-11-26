@@ -123,7 +123,7 @@ func (r *regularSearcher) FindFirstHooksEntry() (*rsl.ReferenceEntry, error) {
 	return entry, nil
 }
 
-// LoadCurrentState returns the current state of teh repository as a
+// LoadCurrentState returns the current state of the repository as a
 // HookState object.
 func LoadCurrentState(repo *gitinterface.Repository) (*HookState, error) {
 	entry, _, err := rsl.GetLatestReferenceEntry(repo, rsl.ForReference(HooksRef))

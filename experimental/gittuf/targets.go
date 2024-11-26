@@ -477,6 +477,8 @@ func (r *Repository) SignTargets(ctx context.Context, signer sslibdsse.SignerVer
 	return state.Commit(r.r, commitMessage, signCommit)
 }
 
+// InitializeHooks initializes the hooks ref, creates targets metadata associated with hooks and creates
+// empty hooks metadata, and commits this to the hooks ref (refs/gittuf/hooks)
 func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.Signer) error {
 	// get current context
 	repo := r.GetGitRepository()
@@ -529,6 +531,9 @@ func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.Signe
 	return state.Commit(repo, hooks.DefaultCommitMessage, nil, true)
 }
 
+// AddHooks defines the workflow for adding a file to be executed as a hook.
+// It commits writes the file, populates all fields in the hooks metadata
+// associated with this file and commits it to the current ref.
 func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 	// assigning all fields from o
 	filePath := o.Filepath
@@ -603,6 +608,9 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 	return state.Commit(repo, commitMessage, hookCommitMap, true)
 }
 
+// ApplyHooks commits all the hook files that were introduced using AddHooks to
+// the current tree, updates the hooks metadata with changes and writes the
+// hash of the hooks metadata to the targets metadata.
 func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) error {
 	// load git repository for current session
 	repo := r.GetGitRepository()
@@ -717,6 +725,8 @@ func (r *Repository) VerifyHooks(state *hooks.HookState) error {
 	return nil
 }
 
+// VerifyHookAccess checks whether the signer (a sslibdsse.Signer object) is
+// authorized to load and use the hook associated with a particular stage or not.
 func (r *Repository) VerifyHookAccess(state *hooks.HookState, signer sslibdsse.Signer, stage string) error {
 	hooksMetadata, err := state.GetHooksMetadata()
 	if err != nil {
