@@ -171,32 +171,6 @@ func (h *Metadata) UpdateHooksMetadata(hookName string, updatedHookIdentifiers *
 }
 
 // GetTargetsMetadata returns a tuf.TargetsMetadata object corresponding to the current HookState
-//func (s *HookState) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata, error) {
-//	e := s.TargetsEnvelope
-//	if roleName != TargetsRoleName {
-//		env, ok := s.DelegationEnvelopes[roleName]
-//		if !ok {
-//			return nil, ErrMetadataNotFound
-//		}
-//		e = env
-//	}
-//
-//	if e == nil {
-//		return nil, ErrMetadataNotFound
-//	}
-//
-//	payloadBytes, err := e.DecodeB64Payload()
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	targetsMetadata := &tufv01.TargetsMetadata{}
-//	if err := json.Unmarshal(payloadBytes, targetsMetadata); err != nil {
-//		return nil, err
-//	}
-//
-//	return targetsMetadata, nil
-//}
 
 // Commit writes hooks and targets metadata and file (if provided) and returns an error if any
 func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage string, blobsMapping map[string]gitinterface.Hash, sign bool) error {
@@ -254,7 +228,6 @@ func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage string, 
 	}
 	slog.Debug("committing hooks metadata successful!")
 
-	// record changes to RSL; reset to original policyx commit if err != nil
 
 	newReferenceEntry := rsl.NewReferenceEntry(HooksRef, commitID)
 	if err := newReferenceEntry.Commit(repo, true); err != nil {
