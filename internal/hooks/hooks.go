@@ -4,14 +4,12 @@
 package hooks
 
 import (
-	"github.com/gittuf/gittuf/internal/rsl"
-	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
-	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
-
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gittuf/gittuf/internal/gitinterface"
+	"github.com/gittuf/gittuf/internal/rsl"
+	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	"github.com/gittuf/gittuf/internal/tuf"
 	"log/slog"
 	"path"
@@ -33,8 +31,8 @@ const (
 
 	ApplyMessage          = "Apply hooks"
 	SigningKey            = "user.signingkey"
+	HooksTreeEntryName    = "hooks"
 	metadataTreeEntryName = "metadata"
-	hooksTreeEntryName    = "hooks"
 )
 
 var (
@@ -54,19 +52,9 @@ type HookState struct {
 }
 
 type Metadata struct {
-	HooksInfo map[string]*Hook    `json:"HooksInfo"`
-	Bindings  map[string]string   `json:"Bindings"`
-	Access    map[string][]string `json:"Access"`
-}
-
-type Hook struct {
-	SHA256Hash  string   `json:"SHA256Hash"`
-	BlobID      string   `json:"BlobID"`
-	Stage       string   `json:"Stage"`
-	Branches    []string `json:"Branches"`
-	Environment string   `json:"Environment"`
-	Modules     []string `json:"Modules"`
-	KeyIDs      []string `json:"KeyIDs"`
+	HooksInfo map[string]*tuf.Hook `json:"HooksInfo"`
+	Bindings  map[string]string    `json:"Bindings"`
+	Access    map[string][]string  `json:"Access"`
 }
 
 type HookIdentifiers struct {
@@ -135,7 +123,7 @@ func LoadCurrentState(repo *gitinterface.Repository) (*HookState, error) {
 
 // InitializeHooksMetadata initializes an empty hooks Metadata object
 func InitializeHooksMetadata() Metadata {
-	return Metadata{HooksInfo: make(map[string]*Hook), Bindings: make(map[string]string), Access: make(map[string][]string)}
+	return Metadata{HooksInfo: make(map[string]*tuf.Hook), Bindings: make(map[string]string), Access: make(map[string][]string)}
 }
 
 // GetHooksMetadata returns the hooks Metadata associated with the current HookState
@@ -162,7 +150,7 @@ func (s *HookState) GetHooksMetadata() (*Metadata, error) {
 
 // GenerateHooksMetadataFor writes Metadata about the provided file and returns an error, if any
 func (h *Metadata) GenerateHooksMetadataFor(hookName, stage, env string, blobID, sha256HashSum gitinterface.Hash, modules, keyIDs []string) error {
-	hookInfo := Hook{
+	hookInfo := tuf.Hook{
 		SHA256Hash:  sha256HashSum.String(),
 		Stage:       stage,
 		BlobID:      blobID.String(),
@@ -177,38 +165,38 @@ func (h *Metadata) GenerateHooksMetadataFor(hookName, stage, env string, blobID,
 
 // UpdateHooksMetadata takes a hook name and a Hook object and replaces the old metadata with
 // this new metadata provided by the Hook object.
-func (h *Metadata) UpdateHooksMetadata(hookName string, updatedHookIdentifiers *Hook) error {
+func (h *Metadata) UpdateHooksMetadata(hookName string, updatedHookIdentifiers *tuf.Hook) error {
 	h.HooksInfo[hookName] = updatedHookIdentifiers
 	return nil
 }
 
 // GetTargetsMetadata returns a tuf.TargetsMetadata object corresponding to the current HookState
-func (s *HookState) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata, error) {
-	e := s.TargetsEnvelope
-	if roleName != TargetsRoleName {
-		env, ok := s.DelegationEnvelopes[roleName]
-		if !ok {
-			return nil, ErrMetadataNotFound
-		}
-		e = env
-	}
-
-	if e == nil {
-		return nil, ErrMetadataNotFound
-	}
-
-	payloadBytes, err := e.DecodeB64Payload()
-	if err != nil {
-		return nil, err
-	}
-
-	targetsMetadata := &tufv01.TargetsMetadata{}
-	if err := json.Unmarshal(payloadBytes, targetsMetadata); err != nil {
-		return nil, err
-	}
-
-	return targetsMetadata, nil
-}
+//func (s *HookState) GetTargetsMetadata(roleName string) (tuf.TargetsMetadata, error) {
+//	e := s.TargetsEnvelope
+//	if roleName != TargetsRoleName {
+//		env, ok := s.DelegationEnvelopes[roleName]
+//		if !ok {
+//			return nil, ErrMetadataNotFound
+//		}
+//		e = env
+//	}
+//
+//	if e == nil {
+//		return nil, ErrMetadataNotFound
+//	}
+//
+//	payloadBytes, err := e.DecodeB64Payload()
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	targetsMetadata := &tufv01.TargetsMetadata{}
+//	if err := json.Unmarshal(payloadBytes, targetsMetadata); err != nil {
+//		return nil, err
+//	}
+//
+//	return targetsMetadata, nil
+//}
 
 // Commit writes hooks and targets metadata and file (if provided) and returns an error if any
 func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage string, blobsMapping map[string]gitinterface.Hash, sign bool) error {
@@ -242,7 +230,7 @@ func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage string, 
 	// structure of blobsMapping is {hookname: blobID}
 	if len(blobsMapping) > 0 {
 		for hookName, blobID := range blobsMapping {
-			allTreeEntries[path.Join(hooksTreeEntryName, hookName)] = blobID
+			allTreeEntries[path.Join(HooksTreeEntryName, hookName)] = blobID
 		}
 	}
 
@@ -266,7 +254,7 @@ func (s *HookState) Commit(repo *gitinterface.Repository, commitMessage string, 
 	}
 	slog.Debug("committing hooks metadata successful!")
 
-	// record changes to RSL; reset to original policy commit if err != nil
+	// record changes to RSL; reset to original policyx commit if err != nil
 
 	newReferenceEntry := rsl.NewReferenceEntry(HooksRef, commitID)
 	if err := newReferenceEntry.Commit(repo, true); err != nil {

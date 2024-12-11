@@ -13,9 +13,9 @@ import (
 	"github.com/gittuf/gittuf/internal/rsl"
 	"io"
 	"log/slog"
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gittuf/gittuf/internal/policy"
 	"github.com/gittuf/gittuf/internal/signerverifier/dsse"
@@ -488,21 +488,28 @@ func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.Signe
 	}
 
 	// create and start populating hookState and policyState (for targets metadata)
-	hookState := &hooks.HookState{Repository: repo}
 	policyState, err := policy.LoadCurrentState(ctx, r.r, policy.PolicyStagingRef)
 	if err != nil {
 		return err
 	}
 
-	slog.Debug("Creating initial rule file...")
-	targetsMetadata := policy.InitializeTargetsMetadata()
+	var targetsMetadata tuf.TargetsMetadata
+
+	if !policyState.HasTargetsRole(policy.TargetsRoleName) {
+		targetsMetadata = policy.InitializeTargetsMetadata()
+	} else {
+		targetsMetadata, err = policyState.GetTargetsMetadata(policy.TargetsRoleName, false)
+		if err != nil {
+			return err
+		}
+	}
+
+	targetsMetadata.InitializeHooks()
 
 	keyID, err := signer.KeyID()
 	if err != nil {
 		return err
 	}
-
-	fmt.Println("KeyID: ", keyID) // temporary , remove later
 
 	// create DSSE envelope for targets metadata
 	env, err := dsse.CreateEnvelope(targetsMetadata)
@@ -517,34 +524,14 @@ func (r *Repository) InitializeHooks(ctx context.Context, signer sslibdsse.Signe
 	}
 	policyState.TargetsEnvelope = env
 
-	slog.Debug("Creating initial empty hooks metadata file...")
-	hooksMetadata := hooks.InitializeHooksMetadata()
-
-	env, err = dsse.CreateEnvelope(hooksMetadata)
-	if err != nil {
-		return err
-	}
-
-	slog.Debug(fmt.Sprintf("Signing hooks file using '%s'...", keyID))
-	env, err = dsse.SignEnvelope(ctx, env, signer)
-	if err != nil {
-		return err
-	}
-	hookState.HooksEnvelope = env
-
 	// commit new targets metadata to policy staging ref
-	err = policyState.Commit(repo, hooks.DefaultCommitMessage, true)
-	if err != nil {
-		return err
-	}
-
-	return hookState.Commit(repo, hooks.DefaultCommitMessage, nil, true)
+	return policyState.Commit(repo, hooks.DefaultCommitMessage, true)
 }
 
 // AddHooks defines the workflow for adding a file to be executed as a hook.
 // It commits writes the file, populates all fields in the hooks metadata
 // associated with this file and commits it to the current ref.
-func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
+func (r *Repository) AddHooks(ctx context.Context, o hooks.HookIdentifiers) error {
 	// assigning all fields from o
 	filePath := o.Filepath
 	stage := o.Stage
@@ -555,21 +542,15 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 
 	// load repository for the current session
 	repo := r.GetGitRepository()
-	hooksTip, err := repo.GetReference(hooks.HooksRef)
+
+	policyTip, err := repo.GetReference(policy.PolicyStagingRef)
 	if err != nil {
 		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
-			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
+			return fmt.Errorf("failed to get policy staging reference %s: %w", policyTip, err)
 		}
 	}
 
-	// load current state for the repository
-	state, err := hooks.LoadCurrentState(repo)
-	if err != nil {
-		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
-			return fmt.Errorf("failed to load hooks: %w", err)
-		}
-	}
-	slog.Debug("Loaded current state")
+	policyState, err := policy.LoadCurrentState(ctx, repo, policy.PolicyStagingRef)
 
 	if hookName == "" {
 		hookName = filepath.Base(filePath)
@@ -590,32 +571,26 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 	sha256Hash.Write(hookFileContents)
 	sha256HashSum := sha256Hash.Sum(nil)
 
-	currentHooksMetadata, err := state.GetHooksMetadata()
-	if err != nil {
-		return err
-	}
 	blobID, err := repo.WriteBlob(hookFileContents)
 	if err != nil {
 		return err
 	}
-
-	// the following line should probably be changed to just passing in the o object later.
-	if err := currentHooksMetadata.GenerateHooksMetadataFor(hookName, stage, execenv, blobID, sha256HashSum, modules, keyIDs); err != nil {
-		return err
-	}
-
-	env, err := dsse.CreateEnvelope(currentHooksMetadata)
+	targetsMetadata, err := policyState.GetTargetsMetadata(policy.TargetsRoleName, false)
 	if err != nil {
 		return err
 	}
 
-	// assign HooksEnvelope field with env value
-	state.HooksEnvelope = env
+	targetsMetadata.SetTargets(hookName, stage, execenv, blobID, sha256HashSum, modules, keyIDs)
+	env, err := dsse.CreateEnvelope(targetsMetadata)
+	if err != nil {
+		return err
+	}
+	policyState.TargetsEnvelope = env
 
 	hookCommitMap := map[string]gitinterface.Hash{hookName: blobID}
 
 	commitMessage := "Add " + hookName
-	return state.Commit(repo, commitMessage, hookCommitMap, true)
+	return policyState.CommitHooks(repo, commitMessage, hookCommitMap, true)
 }
 
 // ApplyHooks commits all the hook files that were introduced using AddHooks to
@@ -624,15 +599,8 @@ func (r *Repository) AddHooks(o hooks.HookIdentifiers) error {
 func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) error {
 	// load git repository for current session
 	repo := r.GetGitRepository()
-	hooksTip, err := repo.GetReference(hooks.HooksRef)
-	if err != nil {
-		if !errors.Is(err, gitinterface.ErrReferenceNotFound) {
-			return fmt.Errorf("failed to get policy reference %s: %w", hooksTip, err)
-		}
-	}
 
-	// load latest hookState and policyState for the current repository
-	hookState, err := hooks.LoadCurrentState(repo)
+	// load latest policyState for the current repository
 	policyState, err := policy.LoadCurrentState(ctx, r.r, policy.PolicyStagingRef)
 
 	// get blobIDs from rsl.GetLatestReferenceEntry
@@ -643,16 +611,15 @@ func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) er
 	}
 	slog.Debug("Loaded current hookState")
 
-	hooksMetadata, err := hookState.GetHooksMetadata()
+	targetsMetadata, err := policyState.GetTargetsMetadata(policy.TargetsRoleName, false)
 	if err != nil {
 		return err
 	}
-
 	// populating the final tree with all hooks to be committed as part of the latest update
 	// => getting the file contents from the blob ID, writing the file and updating
 	// hooks metadata with the new blob ID.
 	hooksApplyMap := make(map[string]gitinterface.Hash)
-	for filename, hookInfo := range hooksMetadata.HooksInfo {
+	for filename, hookInfo := range targetsMetadata.GetTargets() {
 		blobID, err := gitinterface.NewHash(hookInfo.BlobID)
 		if err != nil {
 			return err
@@ -670,13 +637,10 @@ func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) er
 
 		hooksApplyMap[filename] = newBlobID
 		hookInfo.BlobID = newBlobID.String()
-		err = hooksMetadata.UpdateHooksMetadata(filename, hookInfo)
-		if err != nil {
-			return err
-		}
+		targetsMetadata.UpdateTargets(filename, &hookInfo)
 	}
 
-	env, err := dsse.CreateEnvelope(hooksMetadata)
+	env, err := dsse.CreateEnvelope(targetsMetadata)
 	if err != nil {
 		return err
 	}
@@ -686,112 +650,77 @@ func (r *Repository) ApplyHooks(ctx context.Context, signer sslibdsse.Signer) er
 	}
 
 	// set hook envelope in metadata
-	hookState.HooksEnvelope = env
-
-	// load targets metadata
-	targetsMetadata, err := policyState.GetTargetsMetadata(policy.TargetsRoleName)
-	if err != nil {
-		return err
-	}
-
-	h := hookState.HooksEnvelope
-	payloadBytes, err := h.DecodeB64Payload()
-	if err != nil {
-		return err
-	}
-
-	sha256Hash := sha256.New()
-	sha256Hash.Write(payloadBytes)
-	sha256HashSum := sha256Hash.Sum(nil)
-
-	targetsMetadata.SetHooksField(sha256HashSum)
-
-	env, err = dsse.CreateEnvelope(targetsMetadata)
-	if err != nil {
-		return err
-	}
-
-	// sign new targets data
-	env, err = dsse.SignEnvelope(ctx, env, signer)
-	if err != nil {
-		return err
-	}
-
 	policyState.TargetsEnvelope = env
-	err = policyState.Commit(repo, hooks.ApplyMessage, true)
-	if err != nil {
-		return err
-	}
 
-	return hookState.Commit(repo, hooks.ApplyMessage, hooksApplyMap, true)
+	return policyState.CommitHooks(repo, hooks.ApplyMessage, hooksApplyMap, true)
 }
 
 // VerifyHooks verifies the signature of the metadata env
 func (r *Repository) VerifyHooks(state *hooks.HookState) error {
-	h := state.HooksEnvelope
-	payloadBytes, err := h.DecodeB64Payload()
-	if err != nil {
-		return err
-	}
-
-	// calculate SHA256 hash of hooks.json contents
-	sha256Hash := sha256.New()
-	sha256Hash.Write(payloadBytes)
-	sha256HashSum := sha256Hash.Sum(nil)
-
-	// load policy state to get information contained in Targets metadata
-	policyState, err := policy.LoadCurrentState(context.Background(), r.r, policy.PolicyStagingRef)
-	if err != nil {
-		return err
-	}
-
-	targetsMetadata, err := policyState.GetTargetsMetadata(policy.TargetsRoleName)
-	if err != nil {
-		return err
-	}
-
-	sha256HashSumGit := gitinterface.Hash(sha256HashSum)
-	hooksHash := targetsMetadata.GetHooksField()
-
-	// verify if hash in targets metadata == hash calculated from current hooks file.
-	if hooksHash != sha256HashSumGit.String() {
-		return hooks.ErrHooksMetadataHashMismatch
-	}
+	//h := state.TargetsEnvelope
+	//payloadBytes, err := h.DecodeB64Payload()
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//// calculate SHA256 hash of hooks.json contents
+	//sha256Hash := sha256.New()
+	//sha256Hash.Write(payloadBytes)
+	//sha256HashSum := sha256Hash.Sum(nil)
+	//
+	//// load policy state to get information contained in Targets metadata
+	//policyState, err := policy.LoadCurrentState(context.Background(), r.r, policy.PolicyStagingRef)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//targetsMetadata, err := policyState.GetTargetsMetadata(policy.TargetsRoleName, false)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//sha256HashSumGit := gitinterface.Hash(sha256HashSum)
+	//hooksHash := targetsMetadata.GetTargets()
+	//
+	//// verify if hash in targets metadata == hash calculated from current hooks file.
+	//if hooksHash != sha256HashSumGit.String() {
+	//	return hooks.ErrHooksMetadataHashMismatch
+	//}
 
 	return nil
 }
 
 // VerifyHookAccess checks whether the signer (a sslibdsse.Signer object) is
 // authorized to load and use the hook associated with a particular stage or not.
-func (r *Repository) VerifyHookAccess(state *hooks.HookState, signer sslibdsse.Signer, stage string) error {
-	hooksMetadata, err := state.GetHooksMetadata()
-	if err != nil {
-		return err
-	}
-
-	keyID, err := signer.KeyID()
-	if err != nil {
-		return err
-	}
-
-	allowedKeys := hooksMetadata.Access[stage]
-	if allowedKeys == nil {
-		return nil
-	}
-
-	for _, key := range allowedKeys {
-		if keyID == key {
-			return nil
-		}
-	}
-	return hooks.ErrHookAccessDenied
-}
+//func (r *Repository) VerifyHookAccess(state *hooks.HookState, signer sslibdsse.Signer, stage string) error {
+//	hooksMetadata, err := state.GetHooksMetadata()
+//	if err != nil {
+//		return err
+//	}
+//
+//	keyID, err := signer.KeyID()
+//	if err != nil {
+//		return err
+//	}
+//
+//	allowedKeys := hooksMetadata.Access[stage]
+//	if allowedKeys == nil {
+//		return nil
+//	}
+//
+//	for _, key := range allowedKeys {
+//		if keyID == key {
+//			return nil
+//		}
+//	}
+//	return hooks.ErrHookAccessDenied
+//}
 
 // LoadHooks should load the latest hooks metadata and load the hook files
 // todo:change workflow to work with Lua and gVisor - return the bytestream
 // instead of writing the file. The logic for deciding whether to write
 // the file or not should be in gittuf-git/cmd
-func (r *Repository) LoadHooks(signer sslibdsse.Signer) error {
+func (r *Repository) LoadHooks(ctx context.Context, signer sslibdsse.Signer) error {
 	repo := r.GetGitRepository()
 	hooksTip, err := repo.GetReference(hooks.HooksRef)
 	if err != nil {
@@ -800,7 +729,7 @@ func (r *Repository) LoadHooks(signer sslibdsse.Signer) error {
 		}
 	}
 
-	state, err := hooks.LoadCurrentState(repo)
+	state, err := policy.LoadCurrentState(ctx, repo, policy.PolicyStagingRef)
 	if err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return fmt.Errorf("failed to load hooks: %w", err)
@@ -808,24 +737,12 @@ func (r *Repository) LoadHooks(signer sslibdsse.Signer) error {
 	}
 	slog.Debug("Loaded current state")
 
-	err = r.VerifyHooks(state)
+	targetsMetadata, err := state.GetTargetsMetadata(policy.TargetsRoleName, false)
 	if err != nil {
 		return err
 	}
-	slog.Debug("Verification successful.")
+	for filename, hookInfo := range targetsMetadata.GetTargets() {
 
-	hooksMetadata, err := state.GetHooksMetadata()
-	if err != nil {
-		return err
-	}
-
-	for filename, hookInfo := range hooksMetadata.HooksInfo {
-		stage := hookInfo.Stage
-		err := r.VerifyHookAccess(state, signer, stage)
-		if err != nil {
-			fmt.Println("Attempting to load ", stage, " hook with unauthorized key -- skipping...")
-			continue
-		}
 		// convert string hash value to hash object for reading blob contents
 		hookBlobID, err := gitinterface.NewHash(hookInfo.BlobID)
 		hookContents, err := repo.ReadBlob(hookBlobID)

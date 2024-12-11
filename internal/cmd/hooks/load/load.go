@@ -30,7 +30,7 @@ func (o *options) Run(cmd *cobra.Command, _ []string) (err error) {
 	if err != nil {
 		return err
 	}
-	return repo.LoadHooks(signer)
+	return repo.LoadHooks(cmd.Context(), signer)
 }
 
 func New() *cobra.Command {

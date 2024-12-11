@@ -34,7 +34,7 @@ func New(persistent *persistent.Options) *cobra.Command {
 		Use:               "apply",
 		Short:             "secure hooks metadata file by embedding and committing with Targets",
 		RunE:              o.Run,
-		PreRunE:           common.CheckIfSigningViableWithFlag,
+		PreRunE:           common.CheckForSigningKeyFlag,
 		DisableAutoGenTag: true,
 	}
 

@@ -4,6 +4,7 @@
 package gittuf
 
 import (
+	"context"
 	"github.com/gittuf/gittuf/internal/hooks"
 )
 
@@ -27,5 +28,5 @@ func (r *Repository) AddHookFile(filepath, stage, hookName, env string, modules,
 		KeyIDs:      keyIDs,
 	}
 
-	return r.AddHooks(hookIdentifiers)
+	return r.AddHooks(context.Background(), hookIdentifiers)
 }

@@ -116,7 +116,7 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 	}
 
 	//return repo.AddHooks(cmd.Context(), identifiers, signer)
-	return repo.AddHooks(identifiers)
+	return repo.AddHooks(cmd.Context(), identifiers)
 }
 
 func New() *cobra.Command {
