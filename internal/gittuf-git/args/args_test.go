@@ -30,6 +30,8 @@ func TestProcessArgs(t *testing.T) {
 				Command:     "pull",
 				Parameters:  []string{},
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 		"push": {
@@ -39,6 +41,8 @@ func TestProcessArgs(t *testing.T) {
 				Command:     "push",
 				Parameters:  []string{},
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 		"fetch origin": {
@@ -48,6 +52,8 @@ func TestProcessArgs(t *testing.T) {
 				Command:     "fetch",
 				Parameters:  []string{"origin"},
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 		"-C ../somedir fetch origin": {
@@ -58,6 +64,8 @@ func TestProcessArgs(t *testing.T) {
 				Parameters:  []string{"origin"},
 				ChdirIdx:    1,
 				GitDir:      "../somedir/.git",
+
+				RootDir: "../somedir",
 			},
 		},
 		"-c core.editor=vim commit": {
@@ -69,6 +77,8 @@ func TestProcessArgs(t *testing.T) {
 				ChdirIdx:    0,
 				ConfigIdx:   1,
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 		"-c user.name=Test -C ../somedir --version": {
@@ -80,6 +90,8 @@ func TestProcessArgs(t *testing.T) {
 				ChdirIdx:    3,
 				ConfigIdx:   1,
 				GitDir:      "../somedir/.git",
+
+				RootDir: "../somedir",
 			},
 		},
 		"-c user.name=Test -C /tmp/git-repo push origin main": {
@@ -91,6 +103,8 @@ func TestProcessArgs(t *testing.T) {
 				ChdirIdx:    3,
 				ConfigIdx:   1,
 				GitDir:      "/tmp/git-repo/.git",
+
+				RootDir: "/tmp/git-repo",
 			},
 		},
 		"--help": {
@@ -102,6 +116,8 @@ func TestProcessArgs(t *testing.T) {
 				ChdirIdx:    0,
 				ConfigIdx:   0,
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 		"--noop status": {
@@ -113,6 +129,8 @@ func TestProcessArgs(t *testing.T) {
 				ChdirIdx:    0,
 				ConfigIdx:   0,
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 		"--list-cmds=main": {
@@ -124,6 +142,8 @@ func TestProcessArgs(t *testing.T) {
 				ChdirIdx:    0,
 				ConfigIdx:   0,
 				GitDir:      ".git",
+
+				RootDir: ".",
 			},
 		},
 	}
