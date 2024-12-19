@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gittuf/gittuf/internal/hooks"
 	"log/slog"
 	"path"
 	"reflect"
@@ -42,6 +41,8 @@ const (
 	DefaultCommitMessage = "Update policy state"
 
 	metadataTreeEntryName = "metadata"
+
+	hooksTreeEntryName = "hooks"
 
 	gitReferenceRuleScheme = "git"
 	fileRuleScheme         = "file"
@@ -520,7 +521,7 @@ func (s *State) CommitHooks(repo *gitinterface.Repository, commitMessage string,
 	// structure of blobsMapping is {hookname: blobID}
 	if len(blobsMapping) > 0 {
 		for hookName, blobID := range blobsMapping {
-			allTreeEntries[path.Join(hooks.HooksTreeEntryName, hookName)] = blobID
+			allTreeEntries[path.Join(hooksTreeEntryName, hookName)] = blobID
 		}
 	}
 
@@ -556,6 +557,10 @@ func (s *State) CommitHooks(repo *gitinterface.Repository, commitMessage string,
 	}
 	slog.Debug("RSL entry recording successful!")
 	hooksTip, err := repo.GetReference(PolicyStagingRef)
+	if err != nil {
+		return err
+	}
+
 	if err := repo.SetReference(PolicyStagingRef, hooksTip); err != nil {
 		return fmt.Errorf("failed to set new hooks reference: %w", err)
 	}

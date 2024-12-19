@@ -5,11 +5,12 @@ package add
 
 import (
 	"errors"
-	"github.com/gittuf/gittuf/experimental/gittuf"
-	"github.com/gittuf/gittuf/internal/cmd/trust/persistent"
-	"github.com/gittuf/gittuf/internal/hooks"
-	"github.com/spf13/cobra"
 	"strings"
+
+	"github.com/gittuf/gittuf/experimental/gittuf"
+	"github.com/gittuf/gittuf/internal/cmd/policy/persistent"
+	"github.com/gittuf/gittuf/internal/policy"
+	"github.com/spf13/cobra"
 )
 
 // todo: this function must take 2 arguments: path/to/hooks/file and stage
@@ -26,17 +27,27 @@ import (
 
 // QUESTIONS: where will we be copying the scripts to?
 
+var ErrLuaNoModules = errors.New("must specify modules using --modules flag for Lua sandbox environment")
+
 type options struct {
-	p        *persistent.Options
-	filepath string
-	stage    string
-	hookname string
-	env      string
-	modules  []string
-	keyIDs   []string
+	p            *persistent.Options
+	policyName   string
+	filepath     string
+	stage        string
+	hookName     string
+	env          string
+	modules      []string
+	principalIDs []string
 }
 
 func (o *options) AddFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(
+		&o.policyName,
+		"policy-name",
+		policy.TargetsRoleName,
+		"name of policy file to add hook to",
+	)
+
 	cmd.Flags().StringVarP(
 		&o.filepath,
 		"file",
@@ -56,7 +67,7 @@ func (o *options) AddFlags(cmd *cobra.Command) {
 	cmd.MarkFlagRequired("stage") //nolint:errcheck
 
 	cmd.Flags().StringVarP(
-		&o.hookname,
+		&o.hookName,
 		"hookname",
 		"n",
 		"",
@@ -68,30 +79,28 @@ func (o *options) AddFlags(cmd *cobra.Command) {
 		"env",
 		"e",
 		"",
-		"Environment which the hook must run in",
+		"environment which the hook must run in",
 	)
 	cmd.MarkFlagRequired("env") //nolint:errcheck
 
-	cmd.Flags().StringSliceVarP(
+	cmd.Flags().StringArrayVar(
 		&o.modules,
 		"modules",
-		"m",
-		nil,
-		"Modules which the Lua hook must run. Usage: -m module1,module2,modulen",
+		[]string{},
+		"modules which the Lua hook must run",
 	)
-	cmd.Flags().StringSliceVarP(
-		&o.keyIDs,
-		"keyIDs",
-		"i",
-		nil,
-		"Key IDs which must run this hook. Usage: -i k1,k2,k3...",
+	cmd.Flags().StringArrayVar(
+		&o.principalIDs,
+		"principalIDs",
+		[]string{},
+		"principal IDs which must run this hook",
 	)
 
 }
 
 func (o *options) Run(cmd *cobra.Command, _ []string) error {
 	if (strings.ToLower(o.env) == "lua") && (o.modules == nil) {
-		return errors.New("must specify modules using --modules flag for Lua sandbox environment")
+		return ErrLuaNoModules
 	}
 
 	repo, err := gittuf.LoadRepository()
@@ -99,28 +108,16 @@ func (o *options) Run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	//signer, err := gittuf.LoadSigner(repo, o.p.SigningKey)
-	//if err != nil {
-	//	return err
-	//}
-
-	// a hooks.HookIdentifiers object is being used to pass in the value for repo.AddHooks because it's too many
-	// arguments to be passed into the function otherwise.
-	identifiers := hooks.HookIdentifiers{
-		Filepath:    o.filepath,
-		Stage:       o.stage,
-		Hookname:    o.hookname,
-		Environment: o.env,
-		Modules:     o.modules,
-		KeyIDs:      o.keyIDs,
+	signer, err := gittuf.LoadSigner(repo, o.p.SigningKey)
+	if err != nil {
+		return err
 	}
 
-	//return repo.AddHooks(cmd.Context(), identifiers, signer)
-	return repo.AddHooks(cmd.Context(), identifiers)
+	return repo.AddHook(cmd.Context(), signer, "", o.hookName, o.filepath, o.stage, o.env, o.modules, o.principalIDs, true)
 }
 
-func New() *cobra.Command {
-	o := &options{}
+func New(persistent *persistent.Options) *cobra.Command {
+	o := &options{p: persistent}
 	cmd := &cobra.Command{
 		Use:               "add",
 		Short:             "add a script to be run as a hook, specify when and where to run it.",

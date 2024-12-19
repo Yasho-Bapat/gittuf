@@ -4,7 +4,6 @@
 package root
 
 import (
-	"github.com/gittuf/gittuf/internal/cmd/hooks"
 	"log/slog"
 	"os"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/gittuf/gittuf/internal/cmd/clone"
 	"github.com/gittuf/gittuf/internal/cmd/dev"
 	"github.com/gittuf/gittuf/internal/cmd/policy"
+	"github.com/gittuf/gittuf/internal/cmd/policy/hooks"
 	"github.com/gittuf/gittuf/internal/cmd/profile"
 	"github.com/gittuf/gittuf/internal/cmd/rsl"
 	"github.com/gittuf/gittuf/internal/cmd/trust"
