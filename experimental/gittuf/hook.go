@@ -51,7 +51,7 @@ func (r *Repository) UpdateHook(hookType HookType, content []byte, force bool) e
 
 	hookFolder := filepath.Join(gitDir, "hooks")
 	if err := os.MkdirAll(hookFolder, 0o750); err != nil {
-		return fmt.Errorf("making sure folder exist: %w", err)
+		return fmt.Errorf("making sure folder exists: %w", err)
 	}
 
 	hookFile := filepath.Join(hookFolder, string(hookType))
@@ -113,7 +113,7 @@ func (r *Repository) InvokeHook(ctx context.Context, stage string, signer sslibd
 		return nil, err
 	}
 
-	applets := []tuf.Applet{}
+	var applets []tuf.Applet
 
 	for _, hook := range hooks {
 		principals := targetsMetadata.GetPrincipals()
@@ -139,7 +139,6 @@ func (r *Repository) InvokeHook(ctx context.Context, stage string, signer sslibd
 	}
 
 	if attest {
-		// TODO...
 		slog.Debug(fmt.Sprintf("Signing hook attestation using '%s'...", keyID))
 	}
 
@@ -159,11 +158,10 @@ func doesFileExist(path string) (bool, error) {
 }
 
 func (r *Repository) executeLua(stage string, hook tuf.Applet) (int, error) {
-	var hookContent string
-	allowedExcecutables := hook.GetModules()
+	allowedExecutables := hook.GetModules()
 	hookHashes := hook.GetHashes()
 
-	L, err := sandbox.NewLuaEnvironment(allowedExcecutables)
+	L, err := sandbox.NewLuaEnvironment(allowedExecutables)
 	if err != nil {
 		return -1, err
 	}
@@ -187,7 +185,7 @@ func (r *Repository) executeLua(stage string, hook tuf.Applet) (int, error) {
 		return -1, fmt.Errorf("hook content SHA256 hash mismatch")
 	}
 
-	hookContent = string(hookFileContents)
+	hookContent := string(hookFileContents)
 
 	defer L.Close()
 
